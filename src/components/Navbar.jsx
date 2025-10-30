@@ -71,9 +71,9 @@ export default function Navbar() {
         </div>
       </div>
       {open && (
-        <div className="border-t border-gray-200 bg-white md:hidden">
-          <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
-            <div className="flex flex-col gap-3">
+        <div className="border-t border-gray-200 bg-white md:hidden shadow-sm">
+          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+            <div className="flex flex-col gap-4">
               {navItems.map((item) => {
                 const active = pathname === item.href;
                 return (
@@ -82,10 +82,10 @@ export default function Navbar() {
                     href={item.href}
                     onClick={() => setOpen(false)}
                     className={
-                      "text-sm font-medium transition-colors " +
+                      "block rounded-md px-3 py-3 text-base font-medium transition-colors " +
                       (active
-                        ? "text-gray-900"
-                        : "text-gray-600 hover:text-gray-900")
+                        ? "bg-gray-100 text-gray-900"
+                        : "text-gray-700 hover:bg-gray-50 hover:text-gray-900")
                     }
                   >
                     {item.label}
