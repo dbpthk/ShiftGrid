@@ -1,10 +1,10 @@
-import React from "react";
 import db from "@/db";
 import { business_requirements } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import BusinessRequirementForm from "./BusinessRequirementForm";
+import BusinessHoursCard from "./BusinessHoursCard";
 import RequirementRow from "./RequirementRow";
+import BusinessRequirementForm from "./BusinessRequirementForm";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ export default async function BusinessRequirementsPage() {
 
   return (
     <div className="space-y-6">
+      <BusinessHoursCard />
       <BusinessRequirementForm usedDays={usedDays} />
 
       <Card>

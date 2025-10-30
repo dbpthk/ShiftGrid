@@ -84,6 +84,41 @@ export default function RosterWeekEditor({
     return availableEmployees;
   };
 
+  // Accept closingMap as a prop. If not passed, compute a fake one as fallback.
+  // (when you wire this up, pass closingMap prop down from page)
+  const [closingMap, setClosingMap] = React.useState({});
+  React.useEffect(() => {
+    fetch("/api/business-hours")
+      .then((r) => r.json())
+      .then((data) => {
+        const m = {};
+        if (Array.isArray(data?.data))
+          data.data.forEach((row) => (m[row.day_of_week] = row.closing_time));
+        setClosingMap(m);
+      });
+  }, []);
+
+  function parseTimeToMins(str) {
+    if (!str) return null;
+    const [h, m] = str.split(":");
+    return Number(h) * 60 + Number(m);
+  }
+  function slotDurationMins(start, end, endIsClosing, closing, dayName) {
+    if (!start) return 0;
+    if (endIsClosing) {
+      const close = closing || closingMap[dayName];
+      if (!close) return 0;
+      return parseTimeToMins(close) - parseTimeToMins(start);
+    }
+    if (!end) return 0;
+    const s = parseTimeToMins(start);
+    const e = parseTimeToMins(end);
+    if (s == null || e == null) return 0;
+    let diff = e - s;
+    if (diff < 0) diff += 24 * 60;
+    return diff;
+  }
+
   const onSave = async () => {
     setSaving(true);
     try {
@@ -125,17 +160,62 @@ export default function RosterWeekEditor({
     }
   };
 
+  // Calculate hours per day/week summing only assigned slots with correct closing
+  const dayHours = weekDays.map((day) => {
+    const req = requirements[day.dayName] || {};
+    let mins = 0;
+    // Chef slots
+    const chefSlots = req.chef_slots || [];
+    for (let i = 0; i < chefSlots.length; i++) {
+      const slot = chefSlots[i];
+      if (state[day.date]?.["Chef"]?.[i]) {
+        mins += slotDurationMins(
+          slot.start,
+          slot.end,
+          slot.end_is_closing,
+          closingMap[day.dayName],
+          day.dayName
+        );
+      }
+    }
+    // Kitchen slots
+    const kitchenSlots = req.kitchen_slots || [];
+    for (let i = 0; i < kitchenSlots.length; i++) {
+      const slot = kitchenSlots[i];
+      if (state[day.date]?.["Kitchen Hand"]?.[i]) {
+        mins += slotDurationMins(
+          slot.start,
+          slot.end,
+          slot.end_is_closing,
+          closingMap[day.dayName],
+          day.dayName
+        );
+      }
+    }
+    return mins / 60;
+  });
+  const weekTotal = dayHours.reduce((a, b) => a + b, 0);
+
   return (
     <div className="space-y-6">
-      {weekDays.map((day) => {
+      <div className="text-right text-xs text-gray-600 font-semibold">
+        TOTAL ROSTERED HOURS FOR WEEK: {weekTotal.toFixed(1)}
+      </div>
+      {weekDays.map((day, dayIdx) => {
         const req = requirements[day.dayName] || {
           required_chefs: 0,
           required_kitchen_hands: 0,
         };
         return (
-          <div key={day.date} className="rounded-lg border border-gray-200">
+          <div
+            key={day.date}
+            className="rounded-lg border border-gray-200 mb-4"
+          >
             <div className="border-b px-4 py-2 text-sm font-medium text-gray-800">
               {day.dayName} — {day.date}
+              <span className="ml-2 text-xs font-normal text-gray-500">
+                Total Hours: {dayHours[dayIdx].toFixed(1)}
+              </span>
             </div>
             <div className="grid gap-4 p-4 sm:grid-cols-2">
               {[

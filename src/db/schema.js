@@ -59,3 +59,10 @@ export const employee_availability = pgTable("employee_availability", {
   is_available: boolean("is_available").notNull().default(false),
   created_at: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const business_hours = pgTable("business_hours", {
+  id: serial("id").primaryKey(),
+  day_of_week: text("day_of_week").notNull().unique(),
+  closing_time: time("closing_time"),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+});

@@ -16,6 +16,37 @@ export default function ExportTableButton({
   const generateTablePDF = async () => {
     setIsExporting(true);
     try {
+      // Fetch business_hours for closing times
+      const businessHoursRes = await fetch("/api/business-hours");
+      const businessHoursData = await businessHoursRes.json();
+      const closingMap = {};
+      if (Array.isArray(businessHoursData.data)) {
+        businessHoursData.data.forEach((row) => {
+          closingMap[row.day_of_week] = row.closing_time;
+        });
+      }
+
+      // Helper functions
+      function parseTimeToMins(str) {
+        if (!str) return null;
+        const [h, m] = str.split(":");
+        return Number(h) * 60 + Number(m);
+      }
+      function slotDurationMins(start, end, endIsClosing, closing) {
+        if (!start) return 0;
+        if (endIsClosing) {
+          if (!closing) return 0;
+          return parseTimeToMins(closing) - parseTimeToMins(start);
+        }
+        if (!end) return 0;
+        const s = parseTimeToMins(start);
+        const e = parseTimeToMins(end);
+        if (s == null || e == null) return 0;
+        let diff = e - s;
+        if (diff < 0) diff += 24 * 60;
+        return diff;
+      }
+
       const doc = new jsPDF("landscape", "mm", "a4");
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
@@ -70,6 +101,58 @@ export default function ExportTableButton({
         }
       });
 
+      // Compute per-day and week total hours based on actual assigned slots
+      // We want to traverse requirements and existing
+      const reqMap = requirements;
+      const allDayTotals = [];
+      weekDays.forEach((day) => {
+        let mins = 0;
+        const req = reqMap[day.dayName] || {};
+        // Chef slots
+        (req.chef_slots || []).forEach((slot, i) => {
+          // Find if assigned
+          const assigned = existing.find(
+            (r) =>
+              r.shift_date === day.date &&
+              r.role === "Chef" &&
+              r.shift_start.startsWith((slot.start || "").slice(0, 5))
+          );
+          if (!assigned) return;
+          if (!slot.start) return;
+          let shiftEnd = slot.end;
+          let isClosing = slot.end_is_closing;
+          if (isClosing) shiftEnd = closingMap[day.dayName];
+          mins += slotDurationMins(
+            slot.start,
+            shiftEnd,
+            isClosing,
+            closingMap[day.dayName]
+          );
+        });
+        // Kitchen Hand slots
+        (req.kitchen_slots || []).forEach((slot, i) => {
+          const assigned = existing.find(
+            (r) =>
+              r.shift_date === day.date &&
+              r.role === "Kitchen Hand" &&
+              r.shift_start.startsWith((slot.start || "").slice(0, 5))
+          );
+          if (!assigned) return;
+          if (!slot.start) return;
+          let shiftEnd = slot.end;
+          let isClosing = slot.end_is_closing;
+          if (isClosing) shiftEnd = closingMap[day.dayName];
+          mins += slotDurationMins(
+            slot.start,
+            shiftEnd,
+            isClosing,
+            closingMap[day.dayName]
+          );
+        });
+        allDayTotals.push(mins / 60);
+      });
+      const weekTotal = allDayTotals.reduce((a, b) => a + b, 0);
+
       // Table setup
       const tableStartX = 20;
       const nameColumnWidth = 30;
@@ -100,42 +183,118 @@ export default function ExportTableButton({
 
       yPosition += rowHeight;
 
-      // Draw employee rows
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
+      // Build rows per employee (first column is NAME)
+      let perDayTotals = Array(7).fill(0);
+      let weekTotalSlots = 0;
 
-      Object.values(employeeRosters).forEach((employee) => {
-        // Check if we need a new page
+      employees.forEach((emp) => {
+        // new page if needed
         if (yPosition > pageHeight - 20) {
           doc.addPage();
           yPosition = 20;
+          // redraw headers row (optional: skipping for brevity)
         }
-
-        // Employee name cell
+        // Draw name cell
         doc.rect(tableStartX, yPosition - 5, nameColumnWidth, rowHeight);
-        doc.text(employee.name.toUpperCase(), tableStartX + 2, yPosition);
+        doc.text(String(emp.name).toUpperCase(), tableStartX + 2, yPosition);
 
         // Day cells
-        weekDays.forEach((day, index) => {
-          const x = tableStartX + nameColumnWidth + index * dayColumnWidth;
+        weekDays.forEach((day, colIdx) => {
+          const x = tableStartX + nameColumnWidth + colIdx * dayColumnWidth;
           doc.rect(x, yPosition - 5, dayColumnWidth, rowHeight);
 
-          const dayShifts = employee.week[day.date].shifts;
-          if (dayShifts.length > 0) {
-            // Combine all shifts for the day
-            const shiftText = dayShifts.map((shift) => shift.time).join(", ");
-            doc.text(shiftText, x + 1, yPosition);
-          } else {
-            // Check if employee is available but not assigned
-            const empDays = employeeAvailability.get(employee.id) || [];
-            if (empDays.includes(day.dayName)) {
-              doc.text("off", x + 1, yPosition);
-            }
+          const req = requirements[day.dayName] || {};
+          const chefSlots = req.chef_slots || [];
+          const khSlots = req.kitchen_slots || [];
+
+          const chefAssignments = existing.filter(
+            (r) => r.shift_date === day.date && r.role === "Chef"
+          );
+          const khAssignments = existing.filter(
+            (r) => r.shift_date === day.date && r.role === "Kitchen Hand"
+          );
+
+          const parts = [];
+          // Chef slots by index
+          chefSlots.forEach((slot, i) => {
+            const assigned = chefAssignments[i];
+            if (!assigned || assigned.employee_id !== emp.id) return;
+            let end = slot.end;
+            const isClosing = slot.end_is_closing;
+            if (isClosing) end = closingMap[day.dayName];
+            const label = slot.start
+              ? isClosing
+                ? `${String(slot.start).slice(0, 5)}-closing`
+                : `${String(slot.start).slice(0, 5)}-${
+                    end ? String(end).slice(0, 5) : "--"
+                  }`
+              : "";
+            if (label) parts.push(label);
+            const mins = slot.start
+              ? slotDurationMins(
+                  slot.start,
+                  end,
+                  isClosing,
+                  closingMap[day.dayName]
+                )
+              : 0;
+            if (mins > 0)
+              (perDayTotals[colIdx] += mins / 60),
+                (weekTotalSlots += mins / 60);
+          });
+          // KH slots by index
+          khSlots.forEach((slot, i) => {
+            const assigned = khAssignments[i];
+            if (!assigned || assigned.employee_id !== emp.id) return;
+            let end = slot.end;
+            const isClosing = slot.end_is_closing;
+            if (isClosing) end = closingMap[day.dayName];
+            const label = slot.start
+              ? isClosing
+                ? `${String(slot.start).slice(0, 5)}-closing`
+                : `${String(slot.start).slice(0, 5)}-${
+                    end ? String(end).slice(0, 5) : "--"
+                  }`
+              : "";
+            if (label) parts.push(label);
+            const mins = slot.start
+              ? slotDurationMins(
+                  slot.start,
+                  end,
+                  isClosing,
+                  closingMap[day.dayName]
+                )
+              : 0;
+            if (mins > 0)
+              (perDayTotals[colIdx] += mins / 60),
+                (weekTotalSlots += mins / 60);
+          });
+
+          if (parts.length) {
+            doc.text(parts.join(", "), x + 2, yPosition);
           }
         });
 
         yPosition += rowHeight;
       });
+
+      // Per-day totals and week total
+      if (yPosition > pageHeight - 15) {
+        doc.addPage();
+        yPosition = 20;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.text("TOTAL HRS", tableStartX + 2, yPosition);
+      weekDays.forEach((day, index) => {
+        const x = tableStartX + nameColumnWidth + index * dayColumnWidth;
+        doc.text(perDayTotals[index].toFixed(1), x + 1, yPosition);
+      });
+      yPosition += rowHeight + 2;
+      doc.text(
+        `TOTAL ROSTERED HOURS FOR WEEK: ${weekTotalSlots.toFixed(1)}`,
+        tableStartX,
+        yPosition
+      );
 
       // Footer
       const footerY = pageHeight - 10;

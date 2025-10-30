@@ -13,38 +13,40 @@ export default function ExportRosterButton({
 }) {
   const [isExporting, setIsExporting] = React.useState(false);
 
-  // Helper function to get available employees for a specific day and role
-  const getAvailableEmployees = (dayName, role) => {
-    const availableEmployees = employees.filter((emp) => {
-      const empDays = employeeAvailability.get(emp.id) || [];
-      const isAvailable = empDays.includes(dayName);
-
-      if (!isAvailable) return false;
-
-      // Role compatibility check
-      const empRole = emp.role.toLowerCase();
-      if (role === "Chef") {
-        return empRole.includes("chef") || empRole.includes("head");
-      } else if (role === "Kitchen Hand") {
-        return (
-          empRole.includes("chef") ||
-          empRole.includes("kitchen") ||
-          empRole.includes("hand")
-        );
-      }
-      return false;
-    });
-
-    return availableEmployees;
-  };
-
   const generatePDF = async () => {
     setIsExporting(true);
     try {
+      // Fetch business hours for closing
+      const resp = await fetch("/api/business-hours");
+      const data = await resp.json();
+      const closingMap = {};
+      if (Array.isArray(data?.data)) {
+        data.data.forEach((r) => (closingMap[r.day_of_week] = r.closing_time));
+      }
+
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       let yPosition = 20;
+
+      // Helpers
+      const parseMins = (s) => {
+        if (!s) return null;
+        const [h, m] = String(s).split(":");
+        return Number(h) * 60 + Number(m);
+      };
+      const durationMins = (start, end, endIsClosing, dayName) => {
+        if (!start) return 0;
+        if (endIsClosing) {
+          const closing = closingMap[dayName];
+          if (!closing) return 0;
+          return parseMins(closing) - parseMins(start);
+        }
+        if (!end) return 0;
+        let diff = parseMins(end) - parseMins(start);
+        if (diff < 0) diff += 24 * 60;
+        return diff;
+      };
 
       // Title
       doc.setFontSize(20);
@@ -60,120 +62,198 @@ export default function ExportRosterButton({
       doc.text(`${startDate} - ${endDate}`, pageWidth / 2, yPosition, {
         align: "center",
       });
-      yPosition += 20;
+      yPosition += 10;
 
-      // Group rosters by day and role
+      // Build rosters by day/role
       const rostersByDay = {};
       weekDays.forEach((day) => {
-        rostersByDay[day.date] = {
-          Chef: [],
-          "Kitchen Hand": [],
-        };
+        rostersByDay[day.date] = { Chef: [], "Kitchen Hand": [] };
       });
-
-      existing.forEach((roster) => {
-        const dayRosters = rostersByDay[roster.shift_date];
-        if (dayRosters && roster.role) {
-          const employee = employees.find(
-            (emp) => emp.id === roster.employee_id
-          );
-          dayRosters[roster.role].push({
-            id: roster.id,
-            employee_name: employee?.name || `Employee ${roster.employee_id}`,
-            shift_start: roster.shift_start,
-            shift_end: roster.shift_end,
+      existing.forEach((r) => {
+        const d = rostersByDay[r.shift_date];
+        if (d && r.role) {
+          const emp = employees.find((e) => e.id === r.employee_id);
+          d[r.role].push({
+            id: r.id,
+            name: emp?.name || `Emp ${r.employee_id}`,
           });
         }
       });
 
-      // Generate content for each day
-      weekDays.forEach((day, dayIndex) => {
-        // Check if we need a new page
-        if (yPosition > pageHeight - 80) {
-          doc.addPage();
-          yPosition = 20;
-        }
-
-        const req = requirements[day.dayName] || {
-          required_chefs: 0,
-          required_kitchen_hands: 0,
+      // Precompute day payloads (slots, assignments, totals) from requirements + rosters
+      const computedDays = weekDays.map((day) => {
+        const req = requirements[day.dayName] || {};
+        const chefSlots = Array.isArray(req.chef_slots) ? req.chef_slots : [];
+        const khSlots = Array.isArray(req.kitchen_slots)
+          ? req.kitchen_slots
+          : [];
+        const assignedChefs = rostersByDay[day.date]?.["Chef"] || [];
+        const assignedKH = rostersByDay[day.date]?.["Kitchen Hand"] || [];
+        // compute total mins for the day based on slot definitions
+        let dayMins = 0;
+        chefSlots.forEach((s) => {
+          dayMins += durationMins(
+            s.start,
+            s.end,
+            s.end_is_closing,
+            day.dayName
+          );
+        });
+        khSlots.forEach((s) => {
+          dayMins += durationMins(
+            s.start,
+            s.end,
+            s.end_is_closing,
+            day.dayName
+          );
+        });
+        return {
+          dayName: day.dayName,
+          date: day.date,
+          chefSlots,
+          khSlots,
+          assignedChefs,
+          assignedKH,
+          dayMins,
         };
-        const dayRosters = rostersByDay[day.date];
+      });
+
+      // Compute week total while rendering
+      let weekHours = 0;
+
+      // Clean, minimal styling (no emojis/special bullets, standard fonts only)
+      const headerLine = () => {
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.3);
+        doc.line(10, yPosition, pageWidth - 10, yPosition);
+      };
+
+      computedDays.forEach((day, dayIdx) => {
+        if (yPosition > pageHeight - 40) {
+          doc.addPage();
+          yPosition = 18;
+        }
+        const {
+          chefSlots = [],
+          khSlots = [],
+          assignedChefs = [],
+          assignedKH = [],
+          dayMins = 0,
+        } = day;
 
         // Day header
-        doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
-        doc.text(`${day.dayName} - ${day.date}`, 20, yPosition);
-        yPosition += 10;
+        doc.setFontSize(14);
+        doc.setTextColor(0);
+        doc.text(`${day.dayName} - ${day.date}`, 14, yPosition);
+        yPosition += 5;
+        headerLine();
+        yPosition += 4;
 
         // Chef section
         doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text(
-          `Chef (${dayRosters.Chef.length}/${req.required_chefs})`,
-          20,
-          yPosition
-        );
+        doc.text(`Chef (${chefSlots.length})`, 14, yPosition);
         yPosition += 8;
-
         doc.setFont("helvetica", "normal");
-        if (dayRosters.Chef.length > 0) {
-          dayRosters.Chef.forEach((roster) => {
-            doc.text(
-              `• ${roster.employee_name} (${String(
-                roster.shift_start
-              )} - ${String(roster.shift_end)})`,
-              30,
-              yPosition
-            );
-            yPosition += 6;
-          });
+        doc.setFontSize(11);
+        if (chefSlots.length === 0) {
+          doc.setTextColor(120);
+          doc.text(`- No chef slots`, 18, yPosition);
+          doc.setTextColor(0);
+          yPosition += 8;
         } else {
-          doc.text("• No assignments", 30, yPosition);
-          yPosition += 6;
+          chefSlots.forEach((slot, i) => {
+            if (yPosition > pageHeight - 24) {
+              doc.addPage();
+              yPosition = 18;
+            }
+            let end = slot.end;
+            const isClosing = slot.end_is_closing;
+            if (isClosing) end = closingMap[day.dayName];
+            const employeeName = assignedChefs[i]?.name || "Unassigned";
+            const timeLabel = slot.start
+              ? isClosing
+                ? `${String(slot.start).slice(0, 5)} - closing`
+                : `${String(slot.start).slice(0, 5)} - ${
+                    end ? String(end).slice(0, 5) : "--"
+                  }`
+              : "";
+            const line = `- C${i + 1}  ${timeLabel}  ${employeeName}`;
+            if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
+            doc.text(line, 18, yPosition);
+            doc.setTextColor(0);
+            yPosition += 7;
+          });
         }
 
+        yPosition += 2;
         // Kitchen Hand section
         doc.setFont("helvetica", "bold");
-        doc.text(
-          `Kitchen Hand (${dayRosters["Kitchen Hand"].length}/${req.required_kitchen_hands})`,
-          20,
-          yPosition
-        );
+        doc.setFontSize(12);
+        doc.text(`Kitchen Hand (${khSlots.length})`, 14, yPosition);
         yPosition += 8;
-
         doc.setFont("helvetica", "normal");
-        if (dayRosters["Kitchen Hand"].length > 0) {
-          dayRosters["Kitchen Hand"].forEach((roster) => {
-            doc.text(
-              `• ${roster.employee_name} (${String(
-                roster.shift_start
-              )} - ${String(roster.shift_end)})`,
-              30,
-              yPosition
-            );
-            yPosition += 6;
-          });
+        doc.setFontSize(11);
+        if (khSlots.length === 0) {
+          doc.setTextColor(120);
+          doc.text(`- No kitchen hand slots`, 18, yPosition);
+          doc.setTextColor(0);
+          yPosition += 8;
         } else {
-          doc.text("• No assignments", 30, yPosition);
-          yPosition += 6;
+          khSlots.forEach((slot, i) => {
+            if (yPosition > pageHeight - 24) {
+              doc.addPage();
+              yPosition = 18;
+            }
+            let end = slot.end;
+            const isClosing = slot.end_is_closing;
+            if (isClosing) end = closingMap[day.dayName];
+            const employeeName = assignedKH[i]?.name || "Unassigned";
+            const timeLabel = slot.start
+              ? isClosing
+                ? `${String(slot.start).slice(0, 5)} - closing`
+                : `${String(slot.start).slice(0, 5)} - ${
+                    end ? String(end).slice(0, 5) : "--"
+                  }`
+              : "";
+            const line = `- KH${i + 1}  ${timeLabel}  ${employeeName}`;
+            if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
+            doc.text(line, 18, yPosition);
+            doc.setTextColor(0);
+            yPosition += 7;
+          });
         }
 
-        yPosition += 10; // Space between days
+        // Day total
+        const dayHours = dayMins / 60;
+        weekHours += dayHours;
+        yPosition += 4;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(`Total Hours: ${dayHours.toFixed(1)}`, 14, yPosition);
+        yPosition += 8;
+
+        if (dayIdx < computedDays.length - 1) {
+          headerLine();
+          yPosition += 6;
+        }
       });
 
-      // Footer
-      const footerY = pageHeight - 20;
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
+      // Week footer summary
+      if (yPosition > pageHeight - 20) {
+        doc.addPage();
+        yPosition = 18;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
       doc.text(
-        `Generated on ${new Date().toLocaleString()}`,
-        pageWidth / 2,
-        footerY,
-        { align: "center" }
+        `TOTAL ROSTERED HOURS FOR WEEK: ${weekHours.toFixed(1)}`,
+        14,
+        pageHeight - 16
       );
+      doc.setTextColor(0);
 
-      // Save the PDF
+      // Save
       const fileName = `roster-${weekDays[0].date}-to-${weekDays[6].date}.pdf`;
       doc.save(fileName);
     } catch (error) {

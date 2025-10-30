@@ -36,6 +36,13 @@
       "when": 1761800984072,
       "tag": "0004_crazy_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1761824625450,
+      "tag": "0005_lucky_hellion",
+      "breakpoints": true
     }
   ]
 }

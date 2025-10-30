@@ -93,6 +93,74 @@ export default async function Dashboard() {
     }
   });
 
+  // Load business closing hours
+  const closingRows = await db
+    .select()
+    .from(require("@/db/schema").business_hours);
+  const closingMap = {};
+  closingRows.forEach((row) => {
+    closingMap[row.day_of_week] = row.closing_time;
+  });
+
+  // Helper functions
+  function parseTimeToMins(str) {
+    if (!str) return null;
+    const [h, m] = str.split(":");
+    return Number(h) * 60 + Number(m);
+  }
+  function slotDurationMins(start, end, endIsClosing, closing) {
+    if (!start) return 0;
+    if (endIsClosing) {
+      if (!closing) return 0;
+      return parseTimeToMins(closing) - parseTimeToMins(start);
+    }
+    if (!end) return 0;
+    const s = parseTimeToMins(start);
+    const e = parseTimeToMins(end);
+    if (s == null || e == null) return 0;
+    let diff = e - s;
+    if (diff < 0) diff += 24 * 60;
+    return diff;
+  }
+
+  // Calculate actual rostered hours per day BASED ON ROSTERS, slot by slot
+  const hoursByDay = weekDays.map((day) => {
+    const req = requirements[day.dayName] || {};
+    let mins = 0;
+    // Chefs
+    (req.chef_slots || []).forEach((slot, i) => {
+      const r = rostersByDay[day.date]?.Chef?.[i];
+      if (!r) return;
+      if (!slot.start) return;
+      let end = slot.end;
+      let isClosing = slot.end_is_closing;
+      if (isClosing) end = closingMap[day.dayName];
+      mins += slotDurationMins(
+        slot.start,
+        end,
+        isClosing,
+        closingMap[day.dayName]
+      );
+    });
+    // KHs
+    (req.kitchen_slots || []).forEach((slot, i) => {
+      const r = rostersByDay[day.date]?.["Kitchen Hand"]?.[i];
+      if (!r) return;
+      if (!slot.start) return;
+      let end = slot.end;
+      let isClosing = slot.end_is_closing;
+      if (isClosing) end = closingMap[day.dayName];
+      mins += slotDurationMins(
+        slot.start,
+        end,
+        isClosing,
+        closingMap[day.dayName]
+      );
+    });
+    return mins / 60;
+  });
+  const weekHours = hoursByDay.reduce((a, b) => a + b, 0);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -119,12 +187,16 @@ export default async function Dashboard() {
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
-            {weekDays.map((day) => {
-              const req = requirements[day.dayName] || {
-                required_chefs: 0,
-                required_kitchen_hands: 0,
-              };
-              const dayRosters = rostersByDay[day.date];
+            <div className="text-right text-xs text-gray-600 font-semibold">
+              TOTAL ROSTERED HOURS FOR WEEK: {weekHours.toFixed(1)}
+            </div>
+            {weekDays.map((day, idx) => {
+              const chefSlots =
+                (requirements[day.dayName] || {}).chef_slots || [];
+              const khSlots =
+                (requirements[day.dayName] || {}).kitchen_slots || [];
+              const assignedChefs = rostersByDay[day.date]?.Chef || [];
+              const assignedKH = rostersByDay[day.date]?.["Kitchen Hand"] || [];
 
               return (
                 <div
@@ -133,62 +205,97 @@ export default async function Dashboard() {
                 >
                   <div className="border-b px-4 py-3 text-sm font-medium text-gray-800 bg-gray-50">
                     {day.dayName} — {day.date}
+                    <span className="ml-2 text-xs font-normal text-gray-500">
+                      Total Hours: {hoursByDay[idx].toFixed(1)}
+                    </span>
                   </div>
                   <div className="grid gap-4 p-4 sm:grid-cols-2">
-                    {[
-                      {
-                        label: "Chef",
-                        count: req.required_chefs,
-                        rosters: dayRosters.Chef,
-                      },
-                      {
-                        label: "Kitchen Hand",
-                        count: req.required_kitchen_hands,
-                        rosters: dayRosters["Kitchen Hand"],
-                      },
-                    ].map(({ label, count, rosters }) => (
-                      <div key={label} className="space-y-2">
-                        <div className="text-sm font-medium text-gray-700">
-                          {label} ({rosters.length}/{count})
-                        </div>
-                        <div className="space-y-1">
-                          {rosters.length > 0 ? (
-                            rosters.map((roster, idx) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between p-2 bg-green-50 rounded-md border border-green-200"
-                              >
-                                <span className="text-sm font-medium text-green-800">
-                                  {roster.employee_name}
-                                </span>
-                                <span className="text-xs text-green-600">
-                                  {String(roster.shift_start)} -{" "}
-                                  {String(roster.shift_end)}
-                                </span>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="p-2 bg-gray-50 rounded-md border border-gray-200">
-                              <span className="text-sm text-gray-500">
-                                No assignments
-                              </span>
-                            </div>
-                          )}
-                          {Array.from({
-                            length: Math.max(0, count - rosters.length),
-                          }).map((_, idx) => (
-                            <div
-                              key={`empty-${idx}`}
-                              className="p-2 bg-red-50 rounded-md border border-red-200"
-                            >
-                              <span className="text-sm text-red-500">
-                                Unassigned
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                    <div className="space-y-3">
+                      <div className="font-semibold text-gray-700">
+                        Chef ({chefSlots.length})
                       </div>
-                    ))}
+                      {chefSlots.map((slot, i) => {
+                        let end = slot.end;
+                        let isClosing = slot.end_is_closing;
+                        if (isClosing) end = closingMap[day.dayName];
+                        const label = `C${i + 1}`;
+                        const timeLabel =
+                          slot.start && isClosing
+                            ? `${String(slot.start).slice(0, 5)} - closing`
+                            : slot.start && end
+                            ? `${String(slot.start).slice(0, 5)} - ${String(
+                                end
+                              ).slice(0, 5)}`
+                            : "";
+                        const employeeName =
+                          assignedChefs[i]?.employee_name || "Unassigned";
+                        return (
+                          <div
+                            key={i}
+                            className="flex items-center gap-2 text-[12px] text-gray-800"
+                          >
+                            <span className="w-8 inline-block text-gray-500 font-mono">
+                              {label}
+                            </span>
+                            <span className="w-32 inline-block text-gray-500">
+                              {timeLabel}
+                            </span>
+                            <span
+                              className={
+                                employeeName === "Unassigned"
+                                  ? "text-red-500"
+                                  : "font-semibold text-gray-800"
+                              }
+                            >
+                              {employeeName}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="space-y-3">
+                      <div className="font-semibold text-gray-700">
+                        Kitchen Hand ({khSlots.length})
+                      </div>
+                      {khSlots.map((slot, i) => {
+                        let end = slot.end;
+                        let isClosing = slot.end_is_closing;
+                        if (isClosing) end = closingMap[day.dayName];
+                        const label = `KH${i + 1}`;
+                        const timeLabel =
+                          slot.start && isClosing
+                            ? `${String(slot.start).slice(0, 5)} - closing`
+                            : slot.start && end
+                            ? `${String(slot.start).slice(0, 5)} - ${String(
+                                end
+                              ).slice(0, 5)}`
+                            : "";
+                        const employeeName =
+                          assignedKH[i]?.employee_name || "Unassigned";
+                        return (
+                          <div
+                            key={i}
+                            className="flex items-center gap-2 text-[12px] text-gray-800"
+                          >
+                            <span className="w-8 inline-block text-gray-500 font-mono">
+                              {label}
+                            </span>
+                            <span className="w-32 inline-block text-gray-500">
+                              {timeLabel}
+                            </span>
+                            <span
+                              className={
+                                employeeName === "Unassigned"
+                                  ? "text-red-500"
+                                  : "font-semibold text-gray-800"
+                              }
+                            >
+                              {employeeName}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );
