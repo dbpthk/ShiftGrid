@@ -3,13 +3,14 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Image from "next/image";
 
 export default function Navbar() {
   const [open, setOpen] = React.useState(false);
   const pathname = usePathname();
 
   const navItems = [
-    { href: "/", label: "Dashboard" },
+    { href: "/dashboard", label: "Dashboard" },
     { href: "/Employee", label: "Add Employee" },
     { href: "/Employees", label: "View Employees" },
     { href: "/BusinessRequirements", label: "Business Requirements" },
@@ -20,11 +21,13 @@ export default function Navbar() {
     <nav className="sticky top-0 z-40 w-full border-b border-gray-200 bg-white/80 backdrop-blur supports-backdrop-filter:bg-white/60">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
-          <Link
-            href="/"
-            className="text-lg font-semibold tracking-tight text-gray-900"
-          >
-            ShiftGrid
+          <Link href="/" className="flex items-center gap-2">
+            <img
+              src="/logo.png"
+              alt="ShiftGrid Logo"
+              className="h-10 w-auto"
+              style={{ maxHeight: "40px" }}
+            />
           </Link>
           <div className="hidden gap-6 md:flex">
             {navItems.map((item) => {

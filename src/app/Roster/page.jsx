@@ -59,13 +59,7 @@ export default async function RosterPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-2xl">Roster - Next 7 Days</CardTitle>
-            <ExportRosterButton
-              weekDays={weekDays}
-              employees={allEmployees}
-              employeeAvailability={employeeAvailability}
-              requirements={requirements}
-              existing={existing}
-            />
+            {/* Removed ExportRosterButton from Set Rosters page */}
           </div>
         </CardHeader>
         <CardContent>
