@@ -7,6 +7,7 @@ import {
   time,
   integer,
   timestamp,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 export const employees = pgTable("employees", {
@@ -39,8 +40,13 @@ export const business_requirements = pgTable("business_requirements", {
   // Optional time slots per role
   chef_start: time("chef_start"),
   chef_end: time("chef_end"),
+  chef_end_is_closing: boolean("chef_end_is_closing").default(false),
   kitchen_start: time("kitchen_start"),
   kitchen_end: time("kitchen_end"),
+  kitchen_end_is_closing: boolean("kitchen_end_is_closing").default(false),
+  // Optional per-person slot arrays
+  chef_slots: jsonb("chef_slots"),
+  kitchen_slots: jsonb("kitchen_slots"),
   notes: text("notes"),
 });
 

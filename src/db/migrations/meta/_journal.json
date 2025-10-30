@@ -22,6 +22,20 @@
       "when": 1761800031699,
       "tag": "0002_lonely_mauler",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1761800621259,
+      "tag": "0003_great_blob",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1761800984072,
+      "tag": "0004_crazy_morbius",
+      "breakpoints": true
     }
   ]
 }

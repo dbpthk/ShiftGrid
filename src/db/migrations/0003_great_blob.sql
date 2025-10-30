@@ -1,0 +1,2 @@
+ALTER TABLE "business_requirements" ADD COLUMN "chef_end_is_closing" boolean DEFAULT false;--> statement-breakpoint
+ALTER TABLE "business_requirements" ADD COLUMN "kitchen_end_is_closing" boolean DEFAULT false;

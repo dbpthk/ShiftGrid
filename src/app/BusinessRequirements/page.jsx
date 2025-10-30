@@ -33,11 +33,11 @@ export default async function BusinessRequirementsPage() {
                     <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
                       Day
                     </th>
-                    <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
-                      Chefs
+                    <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
+                      Chefs — default range + per-chef slots
                     </th>
-                    <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
-                      Kitchen Hands
+                    <th className="px-2 py-2 text-left text-[10px] sm:text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
+                      Kitchen Hand — default range + per-person slots
                     </th>
                     <th className="hidden px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:table-cell sm:px-4">
                       Notes
