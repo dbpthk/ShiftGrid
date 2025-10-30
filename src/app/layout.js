@@ -5,6 +5,9 @@ import Navbar from "@/components/Navbar";
 export const metadata = {
   title: "ShiftGrid",
   description: "Roster management made simple.",
+  icons: {
+    icon: "/logo.svg",
+  },
 };
 
 export default function RootLayout({ children }) {
