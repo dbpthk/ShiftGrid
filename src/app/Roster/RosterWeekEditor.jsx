@@ -139,40 +139,107 @@ export default function RosterWeekEditor({
             </div>
             <div className="grid gap-4 p-4 sm:grid-cols-2">
               {[
-                { label: "Chef", count: req.required_chefs },
-                { label: "Kitchen Hand", count: req.required_kitchen_hands },
-              ].map(({ label, count }) => (
+                {
+                  label: "Chef",
+                  count:
+                    (req.chef_slots && req.chef_slots.length) ||
+                    req.required_chefs ||
+                    0,
+                  slots: req.chef_slots || [],
+                },
+                {
+                  label: "Kitchen Hand",
+                  count:
+                    (req.kitchen_slots && req.kitchen_slots.length) ||
+                    req.required_kitchen_hands ||
+                    0,
+                  slots: req.kitchen_slots || [],
+                },
+              ].map(({ label, count, slots }) => (
                 <div key={label} className="space-y-2">
                   <div className="text-sm font-medium text-gray-700">
                     {label} ({count})
                   </div>
                   <div className="space-y-2">
                     {Array.from({ length: count || 0 }).map((_, idx) => {
+                      // Compute assigned IDs from ALL roles for this day except the current select slot
+                      const dayAssignments = state[day.date] || {};
+                      // Build a flat list of all assigned employee IDs for this day, excluding the current slot
+                      let assignedIds = [];
+                      Object.entries(dayAssignments).forEach(
+                        ([roleKey, arr]) => {
+                          arr.forEach((v, i) => {
+                            // Exclude the current selector index + role
+                            if (!(roleKey === label && i === idx) && v)
+                              assignedIds.push(v);
+                          });
+                        }
+                      );
                       const availableEmployees = getAvailableEmployees(
                         day.dayName,
                         label
                       );
+                      const slotInfo = slots[idx] || {};
+                      const slotLabel =
+                        label === "Chef"
+                          ? `Chef ${idx + 1}`
+                          : label === "Kitchen Hand"
+                          ? `KH ${idx + 1}`
+                          : label + ` ${idx + 1}`;
+                      const slotTime =
+                        slotInfo.start ||
+                        slotInfo.end ||
+                        slotInfo.end_is_closing
+                          ? `${
+                              slotInfo.start
+                                ? String(slotInfo.start).slice(0, 5)
+                                : "--"
+                            } - ${
+                              slotInfo.end_is_closing
+                                ? "closing"
+                                : slotInfo.end
+                                ? String(slotInfo.end).slice(0, 5)
+                                : "--"
+                            }`
+                          : "";
                       return (
-                        <select
-                          key={idx}
-                          value={state[day.date]?.[label]?.[idx] || ""}
-                          onChange={(e) =>
-                            handleChange(day.date, label, idx, e.target.value)
-                          }
-                          className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
-                        >
-                          <option value="">Unassigned</option>
-                          {availableEmployees.map((emp) => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.role})
-                            </option>
-                          ))}
-                          {availableEmployees.length === 0 && (
-                            <option value="" disabled>
-                              No available employees
-                            </option>
-                          )}
-                        </select>
+                        <div key={idx}>
+                          <label className="block text-[11px] text-gray-500 mb-0.5">
+                            {slotLabel}
+                            {slotTime && (
+                              <span className="ml-2 text-gray-400 font-normal">
+                                {slotTime}
+                              </span>
+                            )}
+                          </label>
+                          <select
+                            value={state[day.date]?.[label]?.[idx] || ""}
+                            onChange={(e) =>
+                              handleChange(day.date, label, idx, e.target.value)
+                            }
+                            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
+                          >
+                            <option value="">Unassigned</option>
+                            {availableEmployees.map((emp) => {
+                              const isAssigned = assignedIds.includes(emp.id);
+                              return (
+                                <option
+                                  key={emp.id}
+                                  value={emp.id}
+                                  disabled={isAssigned}
+                                >
+                                  {emp.name} ({emp.role})
+                                  {isAssigned ? " (already assigned)" : ""}
+                                </option>
+                              );
+                            })}
+                            {availableEmployees.length === 0 && (
+                              <option value="" disabled>
+                                No available employees
+                              </option>
+                            )}
+                          </select>
+                        </div>
                       );
                     })}
                   </div>
