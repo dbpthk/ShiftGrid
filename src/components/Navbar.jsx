@@ -13,7 +13,7 @@ export default function Navbar() {
     { href: "/Employee", label: "Add Employee" },
     { href: "/Employees", label: "View Employees" },
     { href: "/BusinessRequirements", label: "Business Requirements" },
-    { href: "/Roster", label: "View Rosters" },
+    { href: "/Roster", label: "Set Rosters" },
   ];
 
   return (

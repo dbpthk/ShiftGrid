@@ -1,89 +1,81 @@
 import React from "react";
 import db from "@/db";
-import { rosters, employees } from "@/db/schema";
+import {
+  rosters,
+  employees,
+  employee_availability,
+  business_requirements,
+} from "@/db/schema";
 import { inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import RosterWeekEditor from "./RosterWeekEditor";
+import ExportRosterButton from "./ExportRosterButton";
 
 export const dynamic = "force-dynamic";
 
 export default async function RosterPage() {
-  const rows = await db
-    .select({
-      id: rosters.id,
-      shift_date: rosters.shift_date,
-      shift_start: rosters.shift_start,
-      shift_end: rosters.shift_end,
-      role: rosters.role,
-      employee_id: rosters.employee_id,
-    })
-    .from(rosters);
+  const today = new Date();
+  // Find the Monday of current week
+  const dayOfWeek = today.getDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Sunday is 0, so -6 to get Monday
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + mondayOffset);
 
-  // Fetch employee names for the roster entries
-  const employeeIds = Array.from(new Set(rows.map((r) => r.employee_id)));
-  const employeesRows = employeeIds.length
-    ? await db
-        .select()
-        .from(employees)
-        .where(inArray(employees.id, employeeIds))
-    : [];
-  // Note: For simplicity, above uses single eq if only one, otherwise we could expand to in-array support
-  const idToName = new Map(employeesRows.map((e) => [e.id, e.name]));
+  const weekDays = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    const dayName = d.toLocaleDateString(undefined, { weekday: "long" });
+    return { date: iso, dayName };
+  });
+
+  // Load employees and availability
+  const allEmployees = await db.select().from(employees);
+  const availability = await db.select().from(employee_availability);
+
+  // Build availability map: employee_id -> [days]
+  const employeeAvailability = new Map();
+  for (const av of availability) {
+    if (!av.is_available) continue;
+    if (!employeeAvailability.has(av.employee_id)) {
+      employeeAvailability.set(av.employee_id, []);
+    }
+    employeeAvailability.get(av.employee_id).push(av.day_of_week);
+  }
+
+  // Load business requirements
+  const reqRows = await db.select().from(business_requirements);
+  const requirements = reqRows.reduce((acc, r) => {
+    acc[r.day_of_week] = r;
+    return acc;
+  }, {});
+
+  // Load existing rosters in the next 7 days
+  const existing = await db.select().from(rosters);
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Rosters</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-2xl">Roster - Next 7 Days</CardTitle>
+            <ExportRosterButton
+              weekDays={weekDays}
+              employees={allEmployees}
+              employeeAvailability={employeeAvailability}
+              requirements={requirements}
+              existing={existing}
+            />
+          </div>
         </CardHeader>
         <CardContent>
-          {rows.length === 0 ? (
-            <p className="text-sm text-gray-600">No rosters set yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Date
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Start
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      End
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Role
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Employee
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 bg-white">
-                  {rows.map((r) => (
-                    <tr key={r.id}>
-                      <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-900">
-                        {String(r.shift_date)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-700">
-                        {String(r.shift_start)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-700">
-                        {String(r.shift_end)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-700">
-                        {r.role || "-"}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-700">
-                        {idToName.get(r.employee_id) || r.employee_id}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <RosterWeekEditor
+            weekDays={weekDays}
+            employees={allEmployees}
+            employeeAvailability={employeeAvailability}
+            requirements={requirements}
+            existing={existing}
+          />
         </CardContent>
       </Card>
     </div>

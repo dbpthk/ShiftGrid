@@ -21,6 +21,10 @@ const requirementSchema = z.object({
   day_of_week: z.string().min(3, "Day is required"),
   required_chefs: z.coerce.number().int().min(0),
   required_kitchen_hands: z.coerce.number().int().min(0),
+  chef_start: z.string().optional().or(z.literal("")),
+  chef_end: z.string().optional().or(z.literal("")),
+  kitchen_start: z.string().optional().or(z.literal("")),
+  kitchen_end: z.string().optional().or(z.literal("")),
   notes: z.string().optional().or(z.literal("")),
 });
 
@@ -31,6 +35,10 @@ export default function BusinessRequirementForm() {
       day_of_week: "",
       required_chefs: 0,
       required_kitchen_hands: 0,
+      chef_start: "",
+      chef_end: "",
+      kitchen_start: "",
+      kitchen_end: "",
       notes: "",
     },
   });
@@ -107,12 +115,64 @@ export default function BusinessRequirementForm() {
             />
             <FormField
               control={form.control}
+              name="chef_start"
+              render={({ field }) => (
+                <FormItem className="sm:col-span-1">
+                  <FormLabel>Chef Start Time</FormLabel>
+                  <FormControl>
+                    <Input type="time" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="chef_end"
+              render={({ field }) => (
+                <FormItem className="sm:col-span-1">
+                  <FormLabel>Chef End Time</FormLabel>
+                  <FormControl>
+                    <Input type="time" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
               name="required_kitchen_hands"
               render={({ field }) => (
                 <FormItem className="sm:col-span-1">
                   <FormLabel>Required Kitchen Hands</FormLabel>
                   <FormControl>
                     <Input type="number" min={0} {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="kitchen_start"
+              render={({ field }) => (
+                <FormItem className="sm:col-span-1">
+                  <FormLabel>Kitchen Hand Start Time</FormLabel>
+                  <FormControl>
+                    <Input type="time" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="kitchen_end"
+              render={({ field }) => (
+                <FormItem className="sm:col-span-1">
+                  <FormLabel>Kitchen Hand End Time</FormLabel>
+                  <FormControl>
+                    <Input type="time" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

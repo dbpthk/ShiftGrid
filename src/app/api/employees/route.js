@@ -69,7 +69,7 @@ export async function GET() {
 export async function PATCH(req) {
   try {
     const body = await req.json();
-    const { id, name, role, email, phone } = body;
+    const { id, name, role, email, phone, availability } = body;
     if (!id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
@@ -83,6 +83,31 @@ export async function PATCH(req) {
       .set(values)
       .where(eq(employees.id, id))
       .returning();
+
+    // Update availability if provided
+    if (availability && typeof availability === "object") {
+      // Clear previous
+      await db
+        .delete(employee_availability)
+        .where(eq(employee_availability.employee_id, id));
+      const DAYS = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+      ];
+      const rows = DAYS.filter((d) => Boolean(availability[d])).map((d) => ({
+        employee_id: id,
+        day_of_week: d,
+        is_available: true,
+      }));
+      if (rows.length) {
+        await db.insert(employee_availability).values(rows);
+      }
+    }
     return NextResponse.json({ success: true, data: result });
   } catch (error) {
     console.error("API Error:", error);

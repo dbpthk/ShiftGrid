@@ -36,6 +36,11 @@ export const business_requirements = pgTable("business_requirements", {
   day_of_week: text("day_of_week").notNull(),
   required_chefs: integer("required_chefs").notNull(),
   required_kitchen_hands: integer("required_kitchen_hands").notNull(),
+  // Optional time slots per role
+  chef_start: time("chef_start"),
+  chef_end: time("chef_end"),
+  kitchen_start: time("kitchen_start"),
+  kitchen_end: time("kitchen_end"),
   notes: text("notes"),
 });
 

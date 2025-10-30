@@ -30,17 +30,20 @@ export default async function BusinessRequirementsPage() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
                       Day
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
                       Chefs
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
                       Kitchen Hands
                     </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    <th className="hidden px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:table-cell sm:px-4">
                       Notes
+                    </th>
+                    <th className="px-2 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-4">
+                      Actions
                     </th>
                   </tr>
                 </thead>
