@@ -13,10 +13,11 @@ export default async function BusinessRequirementsPage() {
     .select()
     .from(business_requirements)
     .orderBy(desc(business_requirements.id));
+  const usedDays = rows.map((r) => r.day_of_week);
 
   return (
     <div className="space-y-6">
-      <BusinessRequirementForm />
+      <BusinessRequirementForm usedDays={usedDays} />
 
       <Card>
         <CardHeader>
@@ -49,7 +50,7 @@ export default async function BusinessRequirementsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
                   {rows.map((r) => (
-                    <RequirementRow key={r.id} row={r} />
+                    <RequirementRow key={r.id} row={r} usedDays={usedDays} />
                   ))}
                 </tbody>
               </table>

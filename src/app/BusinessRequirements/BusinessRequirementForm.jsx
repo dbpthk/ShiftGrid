@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -48,7 +49,8 @@ const requirementSchema = z.object({
   notes: z.string().optional().or(z.literal("")),
 });
 
-export default function BusinessRequirementForm() {
+export default function BusinessRequirementForm({ usedDays = [] }) {
+  const router = useRouter();
   const form = useForm({
     resolver: zodResolver(requirementSchema),
     defaultValues: {
@@ -67,20 +69,10 @@ export default function BusinessRequirementForm() {
     },
   });
 
-  const [usedDays, setUsedDays] = React.useState(new Set());
-
+  const [disabledDays, setDisabledDays] = React.useState(new Set(usedDays));
   React.useEffect(() => {
-    // Fetch existing to disable already-used days
-    fetch("/api/business-requirements")
-      .then((r) => r.json())
-      .then((res) => {
-        if (res?.data) {
-          const s = new Set(res.data.map((r) => r.day_of_week));
-          setUsedDays(s);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    setDisabledDays(new Set(usedDays));
+  }, [usedDays]);
 
   const onSubmit = async (data) => {
     try {
@@ -93,6 +85,7 @@ export default function BusinessRequirementForm() {
       if (res.ok && result?.success) {
         toast.success("Requirement saved");
         form.reset();
+        router.refresh();
       } else {
         toast.error(result?.error || "Failed to save");
       }
@@ -135,7 +128,11 @@ export default function BusinessRequirementForm() {
                         "Saturday",
                         "Sunday",
                       ].map((d) => (
-                        <option key={d} value={d} disabled={usedDays.has(d)}>
+                        <option
+                          key={d}
+                          value={d}
+                          disabled={disabledDays.has(d)}
+                        >
                           {d}
                         </option>
                       ))}

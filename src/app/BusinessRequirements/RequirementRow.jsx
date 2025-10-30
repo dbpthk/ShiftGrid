@@ -14,10 +14,11 @@ const DAYS = [
   "Sunday",
 ];
 
-export default function RequirementRow({ row }) {
+export default function RequirementRow({ row, usedDays = [] }) {
   const router = useRouter();
   const [isEditing, setIsEditing] = React.useState(false);
   const [rowData, setRowData] = React.useState(row);
+  const [liveUsedDays, setLiveUsedDays] = React.useState(usedDays);
   const [form, setForm] = React.useState({
     day_of_week: row.day_of_week || "",
     required_chefs: row.required_chefs ?? 0,
@@ -96,6 +97,19 @@ export default function RequirementRow({ row }) {
       setSaving(false);
     }
   };
+
+  // Refresh used days when entering edit mode so options reflect latest changes
+  React.useEffect(() => {
+    if (!isEditing) return;
+    fetch("/api/business-requirements")
+      .then((r) => r.json())
+      .then((res) => {
+        if (Array.isArray(res?.data)) {
+          setLiveUsedDays(res.data.map((r) => r.day_of_week));
+        }
+      })
+      .catch(() => {});
+  }, [isEditing]);
 
   const onDelete = async () => {
     if (!confirm("Delete this requirement?")) return;
@@ -212,7 +226,11 @@ export default function RequirementRow({ row }) {
             Select day
           </option>
           {DAYS.map((d) => (
-            <option key={d} value={d}>
+            <option
+              key={d}
+              value={d}
+              disabled={liveUsedDays.includes(d) && d !== form.day_of_week}
+            >
               {d}
             </option>
           ))}
