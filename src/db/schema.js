@@ -1,4 +1,4 @@
-const {
+import {
   pgTable,
   serial,
   text,
@@ -7,9 +7,9 @@ const {
   time,
   integer,
   timestamp,
-} = require("drizzle-orm/pg-core");
+} from "drizzle-orm/pg-core";
 
-const employees = pgTable("employees", {
+export const employees = pgTable("employees", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   role: text("role").notNull(),
@@ -18,7 +18,7 @@ const employees = pgTable("employees", {
   created_at: timestamp("created_at").defaultNow().notNull(),
 });
 
-const rosters = pgTable("rosters", {
+export const rosters = pgTable("rosters", {
   id: serial("id").primaryKey(),
   employee_id: integer("employee_id")
     .notNull()
@@ -31,7 +31,7 @@ const rosters = pgTable("rosters", {
   created_at: timestamp("created_at").defaultNow().notNull(),
 });
 
-const business_requirements = pgTable("business_requirements", {
+export const business_requirements = pgTable("business_requirements", {
   id: serial("id").primaryKey(),
   day_of_week: text("day_of_week").notNull(),
   required_chefs: integer("required_chefs").notNull(),
@@ -39,8 +39,12 @@ const business_requirements = pgTable("business_requirements", {
   notes: text("notes"),
 });
 
-module.exports = {
-  employees,
-  rosters,
-  business_requirements,
-};
+export const employee_availability = pgTable("employee_availability", {
+  id: serial("id").primaryKey(),
+  employee_id: integer("employee_id")
+    .notNull()
+    .references(() => employees.id),
+  day_of_week: text("day_of_week").notNull(), // Monday..Sunday
+  is_available: boolean("is_available").notNull().default(false),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+});
