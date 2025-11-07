@@ -5,45 +5,11 @@ import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  ensureSlotsArray,
+  createSlotArray,
   formatSegmentsForDisplay,
+  mapRosterEntriesToSlots,
   withSegments,
 } from "@/lib/slot-utils";
-
-const EMPTY_SEGMENT = { start: null, end: null, end_is_closing: false };
-
-const createSlotArray = (rawSlots, requiredCount = 0) => {
-  const ensured = ensureSlotsArray(rawSlots || []);
-  const total = ensured.length || requiredCount || 0;
-  if (total === 0) return [];
-  return Array.from({ length: total }).map((_, idx) =>
-    withSegments(ensured[idx] || { segments: [EMPTY_SEGMENT] })
-  );
-};
-
-const assignExistingToSlots = (slots, existingList = []) => {
-  const rosterEntries = (existingList || []).map((item) => ({ ...item, _used: false }));
-  return slots.map((slot) => {
-    const segments = slot.segments || [];
-    return segments.map((segment) => {
-      const startHH = segment.start ? String(segment.start).slice(0, 5) : null;
-      let matchIndex = -1;
-      if (startHH) {
-        matchIndex = rosterEntries.findIndex(
-          (entry) =>
-            !entry._used &&
-            String(entry.shift_start || "").slice(0, 5) === startHH
-        );
-      }
-      if (matchIndex === -1) {
-        matchIndex = rosterEntries.findIndex((entry) => !entry._used);
-      }
-      if (matchIndex === -1) return null;
-      rosterEntries[matchIndex]._used = true;
-      return rosterEntries[matchIndex].employee_id || null;
-    });
-  });
-};
 
 export default function RosterWeekEditor({
   weekDays,
@@ -51,6 +17,7 @@ export default function RosterWeekEditor({
   employeeAvailability,
   requirements,
   existing,
+  weekLabel,
 }) {
   const router = useRouter();
   const [saving, setSaving] = React.useState(false);
@@ -96,14 +63,25 @@ export default function RosterWeekEditor({
         req.required_kitchen_hands
       );
 
+      const chefEntryGroups = mapRosterEntriesToSlots(
+        chefSlots,
+        existingMap.get(`${day.date}|Chef`) || []
+      );
+      const kitchenEntryGroups = mapRosterEntriesToSlots(
+        kitchenSlots,
+        existingMap.get(`${day.date}|Kitchen Hand`) || []
+      );
+
       s[day.date] = {
-        Chef: assignExistingToSlots(
-          chefSlots,
-          existingMap.get(`${day.date}|Chef`) || []
+        Chef: chefEntryGroups.map((group) =>
+          Array.isArray(group)
+            ? group.map((entry) => entry?.employee_id ?? null)
+            : []
         ),
-        "Kitchen Hand": assignExistingToSlots(
-          kitchenSlots,
-          existingMap.get(`${day.date}|Kitchen Hand`) || []
+        "Kitchen Hand": kitchenEntryGroups.map((group) =>
+          Array.isArray(group)
+            ? group.map((entry) => entry?.employee_id ?? null)
+            : []
         ),
       };
     }
@@ -234,7 +212,17 @@ export default function RosterWeekEditor({
 
         for (const { role, assignments, slots } of slotGroups) {
           for (let idx = 0; idx < slots.length; idx += 1) {
-            const slot = slots[idx] || withSegments({ segments: [EMPTY_SEGMENT] });
+            const slot =
+              slots[idx] ||
+              withSegments({
+                segments: [
+                  {
+                    start: null,
+                    end: null,
+                    end_is_closing: false,
+                  },
+                ],
+              });
             const slotAssignments = Array.isArray(assignments[idx])
               ? assignments[idx]
               : [];
@@ -336,6 +324,9 @@ export default function RosterWeekEditor({
 
   return (
     <div className="space-y-6">
+      {weekLabel ? (
+        <div className="text-sm font-medium text-gray-700">Week: {weekLabel}</div>
+      ) : null}
       <div className="text-right text-xs text-gray-600 font-semibold">
         TOTAL ROSTERED HOURS FOR WEEK: {weekTotal.toFixed(1)}
       </div>

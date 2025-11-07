@@ -4,10 +4,9 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import jsPDF from "jspdf";
 import {
-  ensureSlotsArray,
+  createSlotArray,
   formatSegmentsForDisplay,
-  slotSegmentsDurationMinutes,
-  withSegments,
+  mapRosterEntriesToSlots,
 } from "@/lib/slot-utils";
 
 export default function ExportRosterButton({
@@ -41,8 +40,6 @@ export default function ExportRosterButton({
         const [h, m] = String(s).split(":");
         return Number(h) * 60 + Number(m);
       };
-      const durationMins = (slot, dayName) =>
-        slotSegmentsDurationMinutes(slot, closingMap[dayName], parseMins);
 
       // Title
       doc.setFontSize(20);
@@ -65,46 +62,70 @@ export default function ExportRosterButton({
       weekDays.forEach((day) => {
         rostersByDay[day.date] = { Chef: [], "Kitchen Hand": [] };
       });
-      existing
+      const sortedExisting = existing
         .slice()
-        .sort((a, b) => (a.id || 0) - (b.id || 0))
-        .forEach((r) => {
-          const d = rostersByDay[r.shift_date];
-          if (d && r.role && d[r.role]) {
-            const emp = employees.find((e) => e.id === r.employee_id);
-            d[r.role].push({
-              id: r.id,
-              employee_id: r.employee_id,
-              name: emp?.name || `Emp ${r.employee_id}`,
-            });
-          }
+        .sort((a, b) => {
+          const dateCompare = String(a.shift_date).localeCompare(
+            String(b.shift_date)
+          );
+          if (dateCompare !== 0) return dateCompare;
+          const roleCompare = String(a.role || "").localeCompare(
+            String(b.role || "")
+          );
+          if (roleCompare !== 0) return roleCompare;
+          const startCompare = String(a.shift_start || "").localeCompare(
+            String(b.shift_start || "")
+          );
+          if (startCompare !== 0) return startCompare;
+          return (a.id || 0) - (b.id || 0);
         });
+      sortedExisting.forEach((r) => {
+        const d = rostersByDay[r.shift_date];
+        if (d && r.role && d[r.role]) {
+          const emp = employees.find((e) => e.id === r.employee_id);
+          d[r.role].push({
+            id: r.id,
+            employee_id: r.employee_id,
+            name: emp?.name || `Emp ${r.employee_id}`,
+          });
+        }
+      });
 
       // Precompute day payloads (slots, assignments, totals) from requirements + rosters
       const computedDays = weekDays.map((day) => {
         const req = requirements[day.dayName] || {};
-        const chefSlots = ensureSlotsArray(req.chef_slots || []);
-        const khSlots = ensureSlotsArray(req.kitchen_slots || []);
-        const assignedChefs = rostersByDay[day.date]?.["Chef"] || [];
-        const assignedKH = rostersByDay[day.date]?.["Kitchen Hand"] || [];
-        // compute total mins for the day based on slot definitions and assignments
+        const chefSlots = createSlotArray(req.chef_slots, req.required_chefs);
+        const khSlots = createSlotArray(
+          req.kitchen_slots,
+          req.required_kitchen_hands
+        );
+        const assignedChefs = mapRosterEntriesToSlots(
+          chefSlots,
+          rostersByDay[day.date]?.["Chef"] || []
+        );
+        const assignedKH = mapRosterEntriesToSlots(
+          khSlots,
+          rostersByDay[day.date]?.["Kitchen Hand"] || []
+        );
         let dayMins = 0;
-        chefSlots.forEach((slot, idx) => {
-          const normalizedSlot = withSegments(slot);
-          const assignment = assignedChefs[idx];
-          if (!assignment) return;
-          const hasStart = normalizedSlot.segments?.some((seg) => seg.start);
-          if (!hasStart) return;
-          dayMins += durationMins(normalizedSlot, day.dayName);
-        });
-        khSlots.forEach((slot, idx) => {
-          const normalizedSlot = withSegments(slot);
-          const assignment = assignedKH[idx];
-          if (!assignment) return;
-          const hasStart = normalizedSlot.segments?.some((seg) => seg.start);
-          if (!hasStart) return;
-          dayMins += durationMins(normalizedSlot, day.dayName);
-        });
+        const calc = (slot, assignments) => {
+          const segments = slot?.segments || [];
+          segments.forEach((segment, idx) => {
+            const entry = assignments?.[idx];
+            if (!entry || !segment?.start) return;
+            const start = parseMins(segment.start);
+            if (start == null) return;
+            const end = segment.end_is_closing
+              ? parseMins(closingMap[day.dayName])
+              : parseMins(segment.end);
+            if (end == null) return;
+            let diff = end - start;
+            if (diff < 0) diff += 24 * 60;
+            dayMins += diff;
+          });
+        };
+        chefSlots.forEach((slot, idx) => calc(slot, assignedChefs[idx]));
+        khSlots.forEach((slot, idx) => calc(slot, assignedKH[idx]));
         return {
           dayName: day.dayName,
           date: day.date,
@@ -165,17 +186,25 @@ export default function ExportRosterButton({
               doc.addPage();
               yPosition = 18;
             }
-            const normalizedSlot = withSegments(slot);
-            const employeeName = assignedChefs[i]?.name || "Unassigned";
-            const timeLabel = formatSegmentsForDisplay(
-              normalizedSlot,
-              closingMap[day.dayName]
-            );
-            const line = `- C${i + 1}  ${timeLabel}  ${employeeName}`;
-            if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
-            doc.text(line, 18, yPosition);
-            doc.setTextColor(0);
-            yPosition += 7;
+            const segments = slot.segments || [];
+            const assignmentGroup = Array.isArray(assignedChefs[i])
+              ? assignedChefs[i]
+              : [];
+            segments.forEach((segment, segIdx) => {
+              const entry = assignmentGroup[segIdx];
+              const employeeName = entry?.name || "Unassigned";
+              const timeLabel = formatSegmentsForDisplay(
+                { segments: [segment] },
+                closingMap[day.dayName]
+              );
+              const line = `- C${i + 1}${segments.length > 1 ? `.${
+                segIdx + 1
+              }` : ""}  ${timeLabel}  ${employeeName}`;
+              if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
+              doc.text(line, 18, yPosition);
+              doc.setTextColor(0);
+              yPosition += 7;
+            });
           });
         }
 
@@ -198,17 +227,25 @@ export default function ExportRosterButton({
               doc.addPage();
               yPosition = 18;
             }
-            const normalizedSlot = withSegments(slot);
-            const employeeName = assignedKH[i]?.name || "Unassigned";
-            const timeLabel = formatSegmentsForDisplay(
-              normalizedSlot,
-              closingMap[day.dayName]
-            );
-            const line = `- KH${i + 1}  ${timeLabel}  ${employeeName}`;
-            if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
-            doc.text(line, 18, yPosition);
-            doc.setTextColor(0);
-            yPosition += 7;
+            const segments = slot.segments || [];
+            const assignmentGroup = Array.isArray(assignedKH[i])
+              ? assignedKH[i]
+              : [];
+            segments.forEach((segment, segIdx) => {
+              const entry = assignmentGroup[segIdx];
+              const employeeName = entry?.name || "Unassigned";
+              const timeLabel = formatSegmentsForDisplay(
+                { segments: [segment] },
+                closingMap[day.dayName]
+              );
+              const line = `- KH${i + 1}${segments.length > 1 ? `.${
+                segIdx + 1
+              }` : ""}  ${timeLabel}  ${employeeName}`;
+              if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
+              doc.text(line, 18, yPosition);
+              doc.setTextColor(0);
+              yPosition += 7;
+            });
           });
         }
 

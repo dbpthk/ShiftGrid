@@ -36,6 +36,19 @@ export function ensureSlotsArray(slots) {
   return Array.isArray(slots) ? slots.map(withSegments) : [];
 }
 
+export function createSlotArray(rawSlots, requiredCount = 0) {
+  const ensured = ensureSlotsArray(rawSlots || []);
+  const total = ensured.length || requiredCount || 0;
+  if (total === 0) return [];
+  return Array.from({ length: total }).map((_, idx) =>
+    withSegments(
+      ensured[idx] || {
+        segments: [DAY_SEGMENT_DEFAULT],
+      }
+    )
+  );
+}
+
 export function updateSlotSegments(slots, slotIndex, segmentIndex, updater) {
   const nextSlots = ensureSlotsArray(slots);
   while (nextSlots.length <= slotIndex) {
@@ -109,5 +122,34 @@ export function slotSegmentsDurationMinutes(slot, closingTime, parseTimeToMins) 
     if (diff < 0) diff += 24 * 60;
     return total + diff;
   }, 0);
+}
+
+export function mapRosterEntriesToSlots(slots, rosterEntries = []) {
+  const pool = Array.isArray(rosterEntries)
+    ? rosterEntries.map((entry) => ({
+        entry,
+        startKey: String(entry.shift_start || "").slice(0, 5),
+        used: false,
+      }))
+    : [];
+
+  return (Array.isArray(slots) ? slots : []).map((slot) => {
+    const segments = slot?.segments || [];
+    return segments.map((segment) => {
+      const startKey = segment?.start ? String(segment.start).slice(0, 5) : null;
+      let matchIndex = -1;
+      if (startKey) {
+        matchIndex = pool.findIndex(
+          (candidate) => !candidate.used && candidate.startKey === startKey
+        );
+      }
+      if (matchIndex === -1) {
+        matchIndex = pool.findIndex((candidate) => !candidate.used);
+      }
+      if (matchIndex === -1) return null;
+      pool[matchIndex].used = true;
+      return pool[matchIndex].entry;
+    });
+  });
 }
 

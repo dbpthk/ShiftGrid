@@ -9,25 +9,43 @@ import {
 import { asc, inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import RosterWeekEditor from "./RosterWeekEditor";
-import ExportRosterButton from "./ExportRosterButton";
+import RosterWeekNavigator from "./RosterWeekNavigator";
 
 export const dynamic = "force-dynamic";
 
-export default async function RosterPage() {
+function normalizeWeekStart(startParam) {
+  if (!startParam) return null;
+  const date = new Date(startParam);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function toISODate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+export default async function RosterPage({ searchParams }) {
   const today = new Date();
-  // Find the Monday of current week
-  const dayOfWeek = today.getDay();
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Sunday is 0, so -6 to get Monday
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + mondayOffset);
+  const paramStart = normalizeWeekStart(searchParams?.weekStart);
+  const baseDate = paramStart || today;
+
+  // Find the Monday of selected week
+  const baseDay = baseDate.getDay();
+  const mondayOffset = baseDay === 0 ? -6 : 1 - baseDay;
+  const monday = new Date(baseDate);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(baseDate.getDate() + mondayOffset);
 
   const weekDays = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    const iso = d.toISOString().slice(0, 10);
+    const iso = toISODate(d);
     const dayName = d.toLocaleDateString(undefined, { weekday: "long" });
     return { date: iso, dayName };
   });
+
+  const weekStartIso = weekDays[0].date;
+  const weekEndIso = weekDays[6].date;
 
   // Load employees and availability
   const allEmployees = await db.select().from(employees);
@@ -50,21 +68,30 @@ export default async function RosterPage() {
     return acc;
   }, {});
 
-  // Load existing rosters for the current week, ordered deterministically
+  // Load existing rosters for the selected week
   const weekDates = weekDays.map((d) => d.date);
   const existing = await db
     .select()
     .from(rosters)
     .where(inArray(rosters.shift_date, weekDates))
-    .orderBy(asc(rosters.shift_date), asc(rosters.role), asc(rosters.shift_start), asc(rosters.id));
+    .orderBy(
+      asc(rosters.shift_date),
+      asc(rosters.role),
+      asc(rosters.shift_start),
+      asc(rosters.id)
+    );
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-2xl">Roster - Next 7 Days</CardTitle>
-            {/* Removed ExportRosterButton from Set Rosters page */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-2xl">
+                Roster — {weekStartIso} to {weekEndIso}
+              </CardTitle>
+            </div>
+            <RosterWeekNavigator initialStart={weekStartIso} />
           </div>
         </CardHeader>
         <CardContent>
@@ -74,6 +101,7 @@ export default async function RosterPage() {
             employeeAvailability={employeeAvailability}
             requirements={requirements}
             existing={existing}
+            weekLabel={`${weekStartIso} → ${weekEndIso}`}
           />
         </CardContent>
       </Card>

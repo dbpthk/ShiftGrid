@@ -2,12 +2,22 @@
 
 import React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
 
 export default function Navbar() {
   const [open, setOpen] = React.useState(false);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const weekStart = searchParams?.get("weekStart") || null;
+
+  const buildHref = (href) => {
+    if (!weekStart) return href;
+    const params = new URLSearchParams();
+    params.set("weekStart", weekStart);
+    return `${href}?${params.toString()}`;
+  };
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard" },
@@ -21,7 +31,7 @@ export default function Navbar() {
     <nav className="sticky top-0 z-40 w-full border-b border-gray-200 bg-white/80 backdrop-blur supports-backdrop-filter:bg-white/60">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href={buildHref("/")} className="flex items-center gap-2">
             <img
               src="/logo.png"
               alt="ShiftGrid Logo"
@@ -35,7 +45,7 @@ export default function Navbar() {
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={buildHref(item.href)}
                   className={
                     "text-sm font-medium transition-colors " +
                     (active
@@ -79,7 +89,7 @@ export default function Navbar() {
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={buildHref(item.href)}
                     onClick={() => setOpen(false)}
                     className={
                       "block rounded-md px-3 py-3 text-base font-medium transition-colors " +
