@@ -6,7 +6,7 @@ import {
   employee_availability,
   business_requirements,
 } from "@/db/schema";
-import { inArray } from "drizzle-orm";
+import { asc, inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import RosterWeekEditor from "./RosterWeekEditor";
 import ExportRosterButton from "./ExportRosterButton";
@@ -50,8 +50,13 @@ export default async function RosterPage() {
     return acc;
   }, {});
 
-  // Load existing rosters in the next 7 days
-  const existing = await db.select().from(rosters);
+  // Load existing rosters for the current week, ordered deterministically
+  const weekDates = weekDays.map((d) => d.date);
+  const existing = await db
+    .select()
+    .from(rosters)
+    .where(inArray(rosters.shift_date, weekDates))
+    .orderBy(asc(rosters.shift_date), asc(rosters.role), asc(rosters.shift_start), asc(rosters.id));
 
   return (
     <div className="space-y-6">

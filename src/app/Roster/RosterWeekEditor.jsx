@@ -3,11 +3,47 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
+  ensureSlotsArray,
   formatSegmentsForDisplay,
-  slotSegmentsDurationMinutes,
   withSegments,
 } from "@/lib/slot-utils";
+
+const EMPTY_SEGMENT = { start: null, end: null, end_is_closing: false };
+
+const createSlotArray = (rawSlots, requiredCount = 0) => {
+  const ensured = ensureSlotsArray(rawSlots || []);
+  const total = ensured.length || requiredCount || 0;
+  if (total === 0) return [];
+  return Array.from({ length: total }).map((_, idx) =>
+    withSegments(ensured[idx] || { segments: [EMPTY_SEGMENT] })
+  );
+};
+
+const assignExistingToSlots = (slots, existingList = []) => {
+  const rosterEntries = (existingList || []).map((item) => ({ ...item, _used: false }));
+  return slots.map((slot) => {
+    const segments = slot.segments || [];
+    return segments.map((segment) => {
+      const startHH = segment.start ? String(segment.start).slice(0, 5) : null;
+      let matchIndex = -1;
+      if (startHH) {
+        matchIndex = rosterEntries.findIndex(
+          (entry) =>
+            !entry._used &&
+            String(entry.shift_start || "").slice(0, 5) === startHH
+        );
+      }
+      if (matchIndex === -1) {
+        matchIndex = rosterEntries.findIndex((entry) => !entry._used);
+      }
+      if (matchIndex === -1) return null;
+      rosterEntries[matchIndex]._used = true;
+      return rosterEntries[matchIndex].employee_id || null;
+    });
+  });
+};
 
 export default function RosterWeekEditor({
   weekDays,
@@ -20,10 +56,25 @@ export default function RosterWeekEditor({
   const [saving, setSaving] = React.useState(false);
 
   // Build map for existing roster: key = date|role|index -> roster row or null
-  const existingKey = (date, role, idx) => `${date}|${role}|${idx}`;
   const existingMap = new Map();
-  for (const r of existing) {
-    // collapse identical role entries of same day in order
+  const sortedExisting = Array.isArray(existing)
+    ? [...existing].sort((a, b) => {
+        const dateCompare = String(a.shift_date).localeCompare(
+          String(b.shift_date)
+        );
+        if (dateCompare !== 0) return dateCompare;
+        const roleCompare = String(a.role || "").localeCompare(
+          String(b.role || "")
+        );
+        if (roleCompare !== 0) return roleCompare;
+        const startCompare = String(a.shift_start || "").localeCompare(
+          String(b.shift_start || "")
+        );
+        if (startCompare !== 0) return startCompare;
+        return (a.id || 0) - (b.id || 0);
+      })
+    : [];
+  for (const r of sortedExisting) {
     const key = `${r.shift_date}|${r.role || ""}`;
     if (!existingMap.has(key)) existingMap.set(key, []);
     existingMap.get(key).push(r);
@@ -35,33 +86,59 @@ export default function RosterWeekEditor({
       const req = requirements[day.dayName] || {
         required_chefs: 0,
         required_kitchen_hands: 0,
+        chef_slots: [],
+        kitchen_slots: [],
       };
-      const chefSlots = req.required_chefs || 0;
-      const khSlots = req.required_kitchen_hands || 0;
-      const exChef = existingMap.get(`${day.date}|Chef`) || [];
-      const exKh = existingMap.get(`${day.date}|Kitchen Hand`) || [];
+
+      const chefSlots = createSlotArray(req.chef_slots, req.required_chefs);
+      const kitchenSlots = createSlotArray(
+        req.kitchen_slots,
+        req.required_kitchen_hands
+      );
+
       s[day.date] = {
-        Chef: Array.from({ length: chefSlots }).map(
-          (_, i) => exChef[i]?.employee_id || null
+        Chef: assignExistingToSlots(
+          chefSlots,
+          existingMap.get(`${day.date}|Chef`) || []
         ),
-        "Kitchen Hand": Array.from({ length: khSlots }).map(
-          (_, i) => exKh[i]?.employee_id || null
+        "Kitchen Hand": assignExistingToSlots(
+          kitchenSlots,
+          existingMap.get(`${day.date}|Kitchen Hand`) || []
         ),
       };
     }
     return s;
   });
 
-  const handleChange = (date, role, idx, value) => {
-    setState((prev) => ({
-      ...prev,
-      [date]: {
-        ...prev[date],
-        [role]: (prev[date]?.[role] || []).map((v, i) =>
-          i === idx ? (value ? Number(value) : null) : v
-        ),
-      },
-    }));
+  const handleChange = (date, role, slotIdx, segmentIdx, value) => {
+    setState((prev) => {
+      const dayState = { ...(prev[date] || {}) };
+      const roleState = Array.isArray(dayState[role])
+        ? dayState[role].map((slotArr) =>
+            Array.isArray(slotArr) ? [...slotArr] : []
+          )
+        : [];
+
+      while (roleState.length <= slotIdx) {
+        roleState.push([]);
+      }
+
+      const slotAssignments = Array.isArray(roleState[slotIdx])
+        ? [...roleState[slotIdx]]
+        : [];
+      while (slotAssignments.length <= segmentIdx) {
+        slotAssignments.push(null);
+      }
+      slotAssignments[segmentIdx] = value ? Number(value) : null;
+      roleState[slotIdx] = slotAssignments;
+
+      dayState[role] = roleState;
+
+      return {
+        ...prev,
+        [date]: dayState,
+      };
+    });
   };
 
   // Helper function to get available employees for a specific day and role
@@ -113,16 +190,11 @@ export default function RosterWeekEditor({
     const [h, m] = str.split(":");
     return Number(h) * 60 + Number(m);
   }
-  function slotDurationMins(slot, closing) {
-    return slotSegmentsDurationMinutes(slot, closing, parseTimeToMins);
-  }
 
   const onSave = async () => {
     setSaving(true);
     try {
       // Flatten and send creates/updates; for simplicity, we delete all for the range and re-create
-      const from = weekDays[0]?.date;
-      const to = weekDays[weekDays.length - 1]?.date;
       // Delete existing in range (optional: you can refine to day-by-day); here we delete per day before creating
       for (const day of weekDays) {
         const toDelete = existing.filter((r) => r.shift_date === day.date);
@@ -131,28 +203,75 @@ export default function RosterWeekEditor({
         }
       }
 
-      const DEFAULT_START = "09:00:00";
-      const DEFAULT_END = "17:00:00";
       for (const day of weekDays) {
-        for (const role of ["Chef", "Kitchen Hand"]) {
-          const arr = state[day.date]?.[role] || [];
-          for (const employee_id of arr) {
-            if (!employee_id) continue;
-            await fetch("/api/rosters", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                employee_id,
-                shift_date: day.date,
-                shift_start: DEFAULT_START,
-                shift_end: DEFAULT_END,
-                role,
-              }),
-            });
+        const dayReq = requirements[day.dayName] || {};
+        const chefSlots = createSlotArray(
+          dayReq.chef_slots,
+          dayReq.required_chefs
+        );
+        const kitchenSlots = createSlotArray(
+          dayReq.kitchen_slots,
+          dayReq.required_kitchen_hands
+        );
+
+        const slotGroups = [
+          {
+            role: "Chef",
+            assignments: state[day.date]?.["Chef"] || [],
+            slots: chefSlots,
+          },
+          {
+            role: "Kitchen Hand",
+            assignments: state[day.date]?.["Kitchen Hand"] || [],
+            slots: kitchenSlots,
+          },
+        ];
+
+        const formatForDb = (time) => {
+          if (!time) return null;
+          return time.length === 5 ? `${time}:00` : time;
+        };
+
+        for (const { role, assignments, slots } of slotGroups) {
+          for (let idx = 0; idx < slots.length; idx += 1) {
+            const slot = slots[idx] || withSegments({ segments: [EMPTY_SEGMENT] });
+            const slotAssignments = Array.isArray(assignments[idx])
+              ? assignments[idx]
+              : [];
+            const segments = slot.segments || [];
+            const closing = closingMap[day.dayName];
+
+            for (let segIdx = 0; segIdx < segments.length; segIdx += 1) {
+              const segment = segments[segIdx];
+              const employee_id = slotAssignments[segIdx];
+              if (!employee_id || !segment?.start) continue;
+              const shift_start = formatForDb(segment.start);
+              let shift_end = segment.end_is_closing
+                ? formatForDb(closing)
+                : formatForDb(segment.end);
+              if (!shift_end) shift_end = formatForDb(segment.end);
+              if (!shift_start || !shift_end) continue;
+
+              await fetch("/api/rosters", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  employee_id,
+                  shift_date: day.date,
+                  shift_start,
+                  shift_end,
+                  role,
+                }),
+              });
+            }
           }
         }
       }
       router.refresh();
+      toast.success("Roster saved");
+    } catch (error) {
+      console.error("Failed to save roster", error);
+      toast.error("Failed to save roster. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -162,28 +281,55 @@ export default function RosterWeekEditor({
   const dayHours = weekDays.map((day) => {
     const req = requirements[day.dayName] || {};
     let mins = 0;
-    // Chef slots
-    const chefSlots = (req.chef_slots || []).map((slot) => withSegments(slot));
-    for (let i = 0; i < chefSlots.length; i++) {
-      const slot = chefSlots[i];
-      const assignedEmployee = state[day.date]?.["Chef"]?.[i];
-      const hasStart = slot.segments?.some((seg) => seg.start);
-      if (assignedEmployee && hasStart) {
-        mins += slotDurationMins(slot, closingMap[day.dayName]);
-      }
-    }
-    // Kitchen slots
-    const kitchenSlots = (req.kitchen_slots || []).map((slot) =>
-      withSegments(slot)
+    const closing = closingMap[day.dayName];
+    const chefSlots = createSlotArray(req.chef_slots, req.required_chefs);
+    const kitchenSlots = createSlotArray(
+      req.kitchen_slots,
+      req.required_kitchen_hands
     );
-    for (let i = 0; i < kitchenSlots.length; i++) {
-      const slot = kitchenSlots[i];
-      const assignedEmployee = state[day.date]?.["Kitchen Hand"]?.[i];
-      const hasStart = slot.segments?.some((seg) => seg.start);
-      if (assignedEmployee && hasStart) {
-        mins += slotDurationMins(slot, closingMap[day.dayName]);
-      }
-    }
+
+    chefSlots.forEach((slot, slotIdx) => {
+      const slotAssignments = Array.isArray(
+        state[day.date]?.["Chef"]?.[slotIdx]
+      )
+        ? state[day.date]["Chef"][slotIdx]
+        : [];
+      slot.segments?.forEach((segment, segIdx) => {
+        if (!slotAssignments?.[segIdx]) return;
+        if (!segment?.start) return;
+        const start = parseTimeToMins(segment.start);
+        if (start == null) return;
+        const end = segment.end_is_closing
+          ? parseTimeToMins(closing)
+          : parseTimeToMins(segment.end);
+        if (end == null) return;
+        let diff = end - start;
+        if (diff < 0) diff += 24 * 60;
+        mins += diff;
+      });
+    });
+
+    kitchenSlots.forEach((slot, slotIdx) => {
+      const slotAssignments = Array.isArray(
+        state[day.date]?.["Kitchen Hand"]?.[slotIdx]
+      )
+        ? state[day.date]["Kitchen Hand"][slotIdx]
+        : [];
+      slot.segments?.forEach((segment, segIdx) => {
+        if (!slotAssignments?.[segIdx]) return;
+        if (!segment?.start) return;
+        const start = parseTimeToMins(segment.start);
+        if (start == null) return;
+        const end = segment.end_is_closing
+          ? parseTimeToMins(closing)
+          : parseTimeToMins(segment.end);
+        if (end == null) return;
+        let diff = end - start;
+        if (diff < 0) diff += 24 * 60;
+        mins += diff;
+      });
+    });
+
     return mins / 60;
   });
   const weekTotal = dayHours.reduce((a, b) => a + b, 0);
@@ -213,103 +359,138 @@ export default function RosterWeekEditor({
               {[
                 {
                   label: "Chef",
-                  count:
-                    (req.chef_slots && req.chef_slots.length) ||
-                    req.required_chefs ||
-                    0,
-                  slots: (req.chef_slots || []).map((slot) => withSegments(slot)),
+                  slots: createSlotArray(req.chef_slots, req.required_chefs),
                 },
                 {
                   label: "Kitchen Hand",
-                  count:
-                    (req.kitchen_slots && req.kitchen_slots.length) ||
-                    req.required_kitchen_hands ||
-                    0,
-                  slots: (req.kitchen_slots || []).map((slot) =>
-                    withSegments(slot)
+                  slots: createSlotArray(
+                    req.kitchen_slots,
+                    req.required_kitchen_hands
                   ),
                 },
-              ].map(({ label, count, slots }) => (
-                <div key={label} className="space-y-2">
+              ].map(({ label, slots }) => (
+                <div key={label} className="space-y-3">
                   <div className="text-sm font-medium text-gray-700">
-                    {label} ({count})
+                    {label} ({slots.length})
                   </div>
-                  <div className="space-y-2">
-                    {Array.from({ length: count || 0 }).map((_, idx) => {
-                      // Compute assigned IDs from ALL roles for this day except the current select slot
-                      const dayAssignments = state[day.date] || {};
-                      // Build a flat list of all assigned employee IDs for this day, excluding the current slot
-                      let assignedIds = [];
-                      Object.entries(dayAssignments).forEach(
-                        ([roleKey, arr]) => {
-                          arr.forEach((v, i) => {
-                            // Exclude the current selector index + role
-                            if (!(roleKey === label && i === idx) && v)
-                              assignedIds.push(v);
-                          });
-                        }
-                      );
-                      const availableEmployees = getAvailableEmployees(
-                        day.dayName,
-                        label
-                      );
-                      const slotInfo = slots[idx] ||
-                        withSegments({
-                          segments: [
-                            {
-                              start: null,
-                              end: null,
-                              end_is_closing: false,
-                            },
-                          ],
-                        });
-                      const slotLabel =
-                        label === "Chef"
-                          ? `Chef ${idx + 1}`
-                          : label === "Kitchen Hand"
-                          ? `KH ${idx + 1}`
-                          : label + ` ${idx + 1}`;
-                      const slotTime = formatSegmentsForDisplay(
-                        slotInfo,
+                  <div className="space-y-3">
+                    {slots.map((slot, slotIdx) => {
+                      const segments = slot.segments || [];
+                      const slotAssignments = Array.isArray(
+                        state[day.date]?.[label]?.[slotIdx]
+                      )
+                        ? state[day.date][label][slotIdx]
+                        : [];
+                      const slotHeader = formatSegmentsForDisplay(
+                        slot,
                         closingMap[day.dayName]
                       );
+
                       return (
-                        <div key={idx}>
-                          <label className="block text-[11px] text-gray-500 mb-0.5">
-                            {slotLabel}
-                            {slotTime && (
-                              <span className="ml-2 text-gray-400 font-normal">
-                                {slotTime}
+                        <div
+                          key={`${label}-${slotIdx}`}
+                          className="rounded-md border border-gray-200 p-3 space-y-3"
+                        >
+                          <div className="text-[11px] font-semibold uppercase text-gray-600">
+                            {label === "Chef" ? `Chef ${slotIdx + 1}` : `KH ${slotIdx + 1}`}
+                            {slotHeader && (
+                              <span className="ml-2 text-gray-400 normal-case">
+                                {slotHeader}
                               </span>
                             )}
-                          </label>
-                          <select
-                            value={state[day.date]?.[label]?.[idx] || ""}
-                            onChange={(e) =>
-                              handleChange(day.date, label, idx, e.target.value)
-                            }
-                            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
-                          >
-                            <option value="">Unassigned</option>
-                            {availableEmployees.map((emp) => {
-                              const isAssigned = assignedIds.includes(emp.id);
+                          </div>
+                          <div className="space-y-2">
+                            {segments.map((segment, segIdx) => {
+                              const segmentLabel =
+                                segments.length > 1 ? `Segment ${segIdx + 1}` : "Shift";
+                              const segmentTime = formatSegmentsForDisplay(
+                                { segments: [segment] },
+                                closingMap[day.dayName]
+                              );
+                              const currentValue =
+                                slotAssignments?.[segIdx] ?? null;
+
+                              const dayAssignments = state[day.date] || {};
+                              const assignedIds = [];
+                              Object.entries(dayAssignments).forEach(
+                                ([roleKey, roleSlots]) => {
+                                  (roleSlots || []).forEach((slotArr, sIdx) => {
+                                    if (!Array.isArray(slotArr)) return;
+                                    slotArr.forEach((val, sSegIdx) => {
+                                      if (
+                                        val &&
+                                        !(
+                                          roleKey === label &&
+                                          sIdx === slotIdx &&
+                                          sSegIdx === segIdx
+                                        )
+                                      ) {
+                                        assignedIds.push(val);
+                                      }
+                                    });
+                                  });
+                                }
+                              );
+
+                              const availableEmployees = getAvailableEmployees(
+                                day.dayName,
+                                label
+                              );
+
                               return (
-                                <option
-                                  key={emp.id}
-                                  value={emp.id}
-                                  disabled={isAssigned}
+                                <div
+                                  key={`${label}-${slotIdx}-segment-${segIdx}`}
+                                  className="space-y-1"
                                 >
-                                  {emp.name} ({emp.role})
-                                  {isAssigned ? " (already assigned)" : ""}
-                                </option>
+                                  <label className="block text-[11px] text-gray-500">
+                                    {segmentLabel}
+                                    {segmentTime && (
+                                      <span className="ml-2 text-gray-400">
+                                        {segmentTime}
+                                      </span>
+                                    )}
+                                  </label>
+                                  <select
+                                    value={
+                                      currentValue != null
+                                        ? String(currentValue)
+                                        : ""
+                                    }
+                                    onChange={(e) =>
+                                      handleChange(
+                                        day.date,
+                                        label,
+                                        slotIdx,
+                                        segIdx,
+                                        e.target.value
+                                      )
+                                    }
+                                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
+                                  >
+                                    <option value="">Unassigned</option>
+                                    {availableEmployees.map((emp) => {
+                                      const isAssigned = assignedIds.includes(emp.id);
+                                      return (
+                                        <option
+                                          key={emp.id}
+                                          value={String(emp.id)}
+                                          disabled={isAssigned}
+                                        >
+                                          {emp.name} ({emp.role})
+                                          {isAssigned ? " (already assigned)" : ""}
+                                        </option>
+                                      );
+                                    })}
+                                    {availableEmployees.length === 0 && (
+                                      <option value="" disabled>
+                                        No available employees
+                                      </option>
+                                    )}
+                                  </select>
+                                </div>
                               );
                             })}
-                            {availableEmployees.length === 0 && (
-                              <option value="" disabled>
-                                No available employees
-                              </option>
-                            )}
-                          </select>
+                          </div>
                         </div>
                       );
                     })}
@@ -321,7 +502,7 @@ export default function RosterWeekEditor({
         );
       })}
 
-      <div>
+      <div className="flex justify-end">
         <Button onClick={onSave} disabled={saving}>
           {saving ? "Saving..." : "Save Week"}
         </Button>
