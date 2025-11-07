@@ -2,6 +2,26 @@ import db from "./../../../db/index";
 import { business_requirements } from "./../../../db/schema";
 import { NextResponse } from "next/server";
 import { and, desc, eq, ne } from "drizzle-orm";
+import { ensureSlotsArray, withSegments } from "@/lib/slot-utils";
+
+const defaultSegment = (start, end, endIsClosing) => ({
+  segments: [
+    {
+      start: start ?? null,
+      end: endIsClosing ? null : end ?? null,
+      end_is_closing: Boolean(endIsClosing),
+    },
+  ],
+});
+
+const prepareSlots = (slotsInput, count, fallback) => {
+  const normalized = ensureSlotsArray(slotsInput || []);
+  const effective = [...normalized];
+  while (effective.length < count) {
+    effective.push(withSegments(fallback()));
+  }
+  return effective.slice(0, count).map((slot) => withSegments(slot));
+};
 
 export async function GET() {
   try {
@@ -9,7 +29,12 @@ export async function GET() {
       .select()
       .from(business_requirements)
       .orderBy(desc(business_requirements.id));
-    return NextResponse.json({ success: true, data: rows });
+    const normalizedRows = rows.map((row) => ({
+      ...row,
+      chef_slots: ensureSlotsArray(row.chef_slots || []),
+      kitchen_slots: ensureSlotsArray(row.kitchen_slots || []),
+    }));
+    return NextResponse.json({ success: true, data: normalizedRows });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Failed to fetch" }, { status: 500 });
@@ -52,20 +77,19 @@ export async function POST(req) {
     }
 
     // Initialize slots if not provided
-    const normalizedChefSlots = Array.isArray(chef_slots)
-      ? chef_slots
-      : Array.from({ length: Number(required_chefs || 0) }).map(() => ({
-          start: chef_start || null,
-          end: chef_end_is_closing ? null : chef_end || null,
-          end_is_closing: Boolean(chef_end_is_closing),
-        }));
-    const normalizedKitchenSlots = Array.isArray(kitchen_slots)
-      ? kitchen_slots
-      : Array.from({ length: Number(required_kitchen_hands || 0) }).map(() => ({
-          start: kitchen_start || null,
-          end: kitchen_end_is_closing ? null : kitchen_end || null,
-          end_is_closing: Boolean(kitchen_end_is_closing),
-        }));
+    const chefCountNum = Number(required_chefs || 0);
+    const kitchenCountNum = Number(required_kitchen_hands || 0);
+
+    const normalizedChefSlots = prepareSlots(
+      chef_slots,
+      chefCountNum,
+      () => defaultSegment(chef_start, chef_end, chef_end_is_closing)
+    );
+    const normalizedKitchenSlots = prepareSlots(
+      kitchen_slots,
+      kitchenCountNum,
+      () => defaultSegment(kitchen_start, kitchen_end, kitchen_end_is_closing)
+    );
 
     const result = await db.insert(business_requirements).values({
       day_of_week,
@@ -153,9 +177,28 @@ export async function PATCH(req) {
         : kitchen_end
         ? kitchen_end
         : null;
-    if (typeof chef_slots !== "undefined") values.chef_slots = chef_slots;
-    if (typeof kitchen_slots !== "undefined")
-      values.kitchen_slots = kitchen_slots;
+    if (typeof chef_slots !== "undefined") {
+      const chefCountNum =
+        typeof required_chefs !== "undefined"
+          ? Number(required_chefs || 0)
+          : ensureSlotsArray(chef_slots || []).length;
+      values.chef_slots = prepareSlots(
+        chef_slots,
+        chefCountNum,
+        () => defaultSegment(chef_start, chef_end, chef_end_is_closing)
+      );
+    }
+    if (typeof kitchen_slots !== "undefined") {
+      const kitchenCountNum =
+        typeof required_kitchen_hands !== "undefined"
+          ? Number(required_kitchen_hands || 0)
+          : ensureSlotsArray(kitchen_slots || []).length;
+      values.kitchen_slots = prepareSlots(
+        kitchen_slots,
+        kitchenCountNum,
+        () => defaultSegment(kitchen_start, kitchen_end, kitchen_end_is_closing)
+      );
+    }
     if (typeof notes !== "undefined") values.notes = notes;
 
     const result = await db

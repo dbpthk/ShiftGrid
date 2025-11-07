@@ -3,6 +3,11 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import {
+  formatSegmentsForDisplay,
+  slotSegmentsDurationMinutes,
+  withSegments,
+} from "@/lib/slot-utils";
 
 export default function RosterWeekEditor({
   weekDays,
@@ -108,20 +113,8 @@ export default function RosterWeekEditor({
     const [h, m] = str.split(":");
     return Number(h) * 60 + Number(m);
   }
-  function slotDurationMins(start, end, endIsClosing, closing, dayName) {
-    if (!start) return 0;
-    if (endIsClosing) {
-      const close = closing || closingMap[dayName];
-      if (!close) return 0;
-      return parseTimeToMins(close) - parseTimeToMins(start);
-    }
-    if (!end) return 0;
-    const s = parseTimeToMins(start);
-    const e = parseTimeToMins(end);
-    if (s == null || e == null) return 0;
-    let diff = e - s;
-    if (diff < 0) diff += 24 * 60;
-    return diff;
+  function slotDurationMins(slot, closing) {
+    return slotSegmentsDurationMinutes(slot, closing, parseTimeToMins);
   }
 
   const onSave = async () => {
@@ -170,31 +163,25 @@ export default function RosterWeekEditor({
     const req = requirements[day.dayName] || {};
     let mins = 0;
     // Chef slots
-    const chefSlots = req.chef_slots || [];
+    const chefSlots = (req.chef_slots || []).map((slot) => withSegments(slot));
     for (let i = 0; i < chefSlots.length; i++) {
       const slot = chefSlots[i];
-      if (state[day.date]?.["Chef"]?.[i]) {
-        mins += slotDurationMins(
-          slot.start,
-          slot.end,
-          slot.end_is_closing,
-          closingMap[day.dayName],
-          day.dayName
-        );
+      const assignedEmployee = state[day.date]?.["Chef"]?.[i];
+      const hasStart = slot.segments?.some((seg) => seg.start);
+      if (assignedEmployee && hasStart) {
+        mins += slotDurationMins(slot, closingMap[day.dayName]);
       }
     }
     // Kitchen slots
-    const kitchenSlots = req.kitchen_slots || [];
+    const kitchenSlots = (req.kitchen_slots || []).map((slot) =>
+      withSegments(slot)
+    );
     for (let i = 0; i < kitchenSlots.length; i++) {
       const slot = kitchenSlots[i];
-      if (state[day.date]?.["Kitchen Hand"]?.[i]) {
-        mins += slotDurationMins(
-          slot.start,
-          slot.end,
-          slot.end_is_closing,
-          closingMap[day.dayName],
-          day.dayName
-        );
+      const assignedEmployee = state[day.date]?.["Kitchen Hand"]?.[i];
+      const hasStart = slot.segments?.some((seg) => seg.start);
+      if (assignedEmployee && hasStart) {
+        mins += slotDurationMins(slot, closingMap[day.dayName]);
       }
     }
     return mins / 60;
@@ -230,7 +217,7 @@ export default function RosterWeekEditor({
                     (req.chef_slots && req.chef_slots.length) ||
                     req.required_chefs ||
                     0,
-                  slots: req.chef_slots || [],
+                  slots: (req.chef_slots || []).map((slot) => withSegments(slot)),
                 },
                 {
                   label: "Kitchen Hand",
@@ -238,7 +225,9 @@ export default function RosterWeekEditor({
                     (req.kitchen_slots && req.kitchen_slots.length) ||
                     req.required_kitchen_hands ||
                     0,
-                  slots: req.kitchen_slots || [],
+                  slots: (req.kitchen_slots || []).map((slot) =>
+                    withSegments(slot)
+                  ),
                 },
               ].map(({ label, count, slots }) => (
                 <div key={label} className="space-y-2">
@@ -264,29 +253,26 @@ export default function RosterWeekEditor({
                         day.dayName,
                         label
                       );
-                      const slotInfo = slots[idx] || {};
+                      const slotInfo = slots[idx] ||
+                        withSegments({
+                          segments: [
+                            {
+                              start: null,
+                              end: null,
+                              end_is_closing: false,
+                            },
+                          ],
+                        });
                       const slotLabel =
                         label === "Chef"
                           ? `Chef ${idx + 1}`
                           : label === "Kitchen Hand"
                           ? `KH ${idx + 1}`
                           : label + ` ${idx + 1}`;
-                      const slotTime =
-                        slotInfo.start ||
-                        slotInfo.end ||
-                        slotInfo.end_is_closing
-                          ? `${
-                              slotInfo.start
-                                ? String(slotInfo.start).slice(0, 5)
-                                : "--"
-                            } - ${
-                              slotInfo.end_is_closing
-                                ? "closing"
-                                : slotInfo.end
-                                ? String(slotInfo.end).slice(0, 5)
-                                : "--"
-                            }`
-                          : "";
+                      const slotTime = formatSegmentsForDisplay(
+                        slotInfo,
+                        closingMap[day.dayName]
+                      );
                       return (
                         <div key={idx}>
                           <label className="block text-[11px] text-gray-500 mb-0.5">

@@ -10,6 +10,11 @@ import { inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ExportRosterButton from "../Roster/ExportRosterButton";
 import ExportTableButton from "../Roster/ExportTableButton";
+import {
+  formatSegmentsForDisplay,
+  slotSegmentsDurationMinutes,
+  withSegments,
+} from "@/lib/slot-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -99,52 +104,31 @@ export default async function Dashboard() {
     const [h, m] = str.split(":");
     return Number(h) * 60 + Number(m);
   }
-  function slotDurationMins(start, end, endIsClosing, closing) {
-    if (!start) return 0;
-    if (endIsClosing) {
-      if (!closing) return 0;
-      return parseTimeToMins(closing) - parseTimeToMins(start);
-    }
-    if (!end) return 0;
-    const s = parseTimeToMins(start);
-    const e = parseTimeToMins(end);
-    if (s == null || e == null) return 0;
-    let diff = e - s;
-    if (diff < 0) diff += 24 * 60;
-    return diff;
+  function slotDurationMins(slot, closing) {
+    return slotSegmentsDurationMinutes(slot, closing, parseTimeToMins);
   }
 
   const hoursByDay = weekDays.map((day) => {
     const req = requirements[day.dayName] || {};
     let mins = 0;
-    (req.chef_slots || []).forEach((slot, i) => {
-      const r = rostersByDay[day.date]?.Chef?.[i];
-      if (!r) return;
-      if (!slot.start) return;
-      let end = slot.end;
-      let isClosing = slot.end_is_closing;
-      if (isClosing) end = closingMap[day.dayName];
-      mins += slotDurationMins(
-        slot.start,
-        end,
-        isClosing,
-        closingMap[day.dayName]
-      );
-    });
-    (req.kitchen_slots || []).forEach((slot, i) => {
-      const r = rostersByDay[day.date]?.["Kitchen Hand"]?.[i];
-      if (!r) return;
-      if (!slot.start) return;
-      let end = slot.end;
-      let isClosing = slot.end_is_closing;
-      if (isClosing) end = closingMap[day.dayName];
-      mins += slotDurationMins(
-        slot.start,
-        end,
-        isClosing,
-        closingMap[day.dayName]
-      );
-    });
+    (req.chef_slots || [])
+      .map((slot) => withSegments(slot))
+      .forEach((slot, i) => {
+        const r = rostersByDay[day.date]?.Chef?.[i];
+        if (!r) return;
+        const hasStart = slot.segments?.some((seg) => seg.start);
+        if (!hasStart) return;
+        mins += slotDurationMins(slot, closingMap[day.dayName]);
+      });
+    (req.kitchen_slots || [])
+      .map((slot) => withSegments(slot))
+      .forEach((slot, i) => {
+        const r = rostersByDay[day.date]?.["Kitchen Hand"]?.[i];
+        if (!r) return;
+        const hasStart = slot.segments?.some((seg) => seg.start);
+        if (!hasStart) return;
+        mins += slotDurationMins(slot, closingMap[day.dayName]);
+      });
     return mins / 60;
   });
   const weekHours = hoursByDay.reduce((a, b) => a + b, 0);
@@ -203,18 +187,12 @@ export default async function Dashboard() {
                         Chef ({chefSlots.length})
                       </div>
                       {chefSlots.map((slot, i) => {
-                        let end = slot.end;
-                        let isClosing = slot.end_is_closing;
-                        if (isClosing) end = closingMap[day.dayName];
+                        const normalizedSlot = withSegments(slot);
                         const label = `C${i + 1}`;
-                        const timeLabel =
-                          slot.start && isClosing
-                            ? `${String(slot.start).slice(0, 5)} - closing`
-                            : slot.start && end
-                            ? `${String(slot.start).slice(0, 5)} - ${String(
-                                end
-                              ).slice(0, 5)}`
-                            : "";
+                        const timeLabel = formatSegmentsForDisplay(
+                          normalizedSlot,
+                          closingMap[day.dayName]
+                        );
                         const employeeName =
                           assignedChefs[i]?.employee_name || "Unassigned";
                         return (
@@ -246,18 +224,12 @@ export default async function Dashboard() {
                         Kitchen Hand ({khSlots.length})
                       </div>
                       {khSlots.map((slot, i) => {
-                        let end = slot.end;
-                        let isClosing = slot.end_is_closing;
-                        if (isClosing) end = closingMap[day.dayName];
+                        const normalizedSlot = withSegments(slot);
                         const label = `KH${i + 1}`;
-                        const timeLabel =
-                          slot.start && isClosing
-                            ? `${String(slot.start).slice(0, 5)} - closing`
-                            : slot.start && end
-                            ? `${String(slot.start).slice(0, 5)} - ${String(
-                                end
-                              ).slice(0, 5)}`
-                            : "";
+                        const timeLabel = formatSegmentsForDisplay(
+                          normalizedSlot,
+                          closingMap[day.dayName]
+                        );
                         const employeeName =
                           assignedKH[i]?.employee_name || "Unassigned";
                         return (

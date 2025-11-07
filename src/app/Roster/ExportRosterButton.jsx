@@ -3,6 +3,12 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import jsPDF from "jspdf";
+import {
+  ensureSlotsArray,
+  formatSegmentsForDisplay,
+  slotSegmentsDurationMinutes,
+  withSegments,
+} from "@/lib/slot-utils";
 
 export default function ExportRosterButton({
   weekDays,
@@ -35,18 +41,8 @@ export default function ExportRosterButton({
         const [h, m] = String(s).split(":");
         return Number(h) * 60 + Number(m);
       };
-      const durationMins = (start, end, endIsClosing, dayName) => {
-        if (!start) return 0;
-        if (endIsClosing) {
-          const closing = closingMap[dayName];
-          if (!closing) return 0;
-          return parseMins(closing) - parseMins(start);
-        }
-        if (!end) return 0;
-        let diff = parseMins(end) - parseMins(start);
-        if (diff < 0) diff += 24 * 60;
-        return diff;
-      };
+      const durationMins = (slot, dayName) =>
+        slotSegmentsDurationMinutes(slot, closingMap[dayName], parseMins);
 
       // Title
       doc.setFontSize(20);
@@ -69,43 +65,45 @@ export default function ExportRosterButton({
       weekDays.forEach((day) => {
         rostersByDay[day.date] = { Chef: [], "Kitchen Hand": [] };
       });
-      existing.forEach((r) => {
-        const d = rostersByDay[r.shift_date];
-        if (d && r.role) {
-          const emp = employees.find((e) => e.id === r.employee_id);
-          d[r.role].push({
-            id: r.id,
-            name: emp?.name || `Emp ${r.employee_id}`,
-          });
-        }
-      });
+      existing
+        .slice()
+        .sort((a, b) => (a.id || 0) - (b.id || 0))
+        .forEach((r) => {
+          const d = rostersByDay[r.shift_date];
+          if (d && r.role && d[r.role]) {
+            const emp = employees.find((e) => e.id === r.employee_id);
+            d[r.role].push({
+              id: r.id,
+              employee_id: r.employee_id,
+              name: emp?.name || `Emp ${r.employee_id}`,
+            });
+          }
+        });
 
       // Precompute day payloads (slots, assignments, totals) from requirements + rosters
       const computedDays = weekDays.map((day) => {
         const req = requirements[day.dayName] || {};
-        const chefSlots = Array.isArray(req.chef_slots) ? req.chef_slots : [];
-        const khSlots = Array.isArray(req.kitchen_slots)
-          ? req.kitchen_slots
-          : [];
+        const chefSlots = ensureSlotsArray(req.chef_slots || []);
+        const khSlots = ensureSlotsArray(req.kitchen_slots || []);
         const assignedChefs = rostersByDay[day.date]?.["Chef"] || [];
         const assignedKH = rostersByDay[day.date]?.["Kitchen Hand"] || [];
-        // compute total mins for the day based on slot definitions
+        // compute total mins for the day based on slot definitions and assignments
         let dayMins = 0;
-        chefSlots.forEach((s) => {
-          dayMins += durationMins(
-            s.start,
-            s.end,
-            s.end_is_closing,
-            day.dayName
-          );
+        chefSlots.forEach((slot, idx) => {
+          const normalizedSlot = withSegments(slot);
+          const assignment = assignedChefs[idx];
+          if (!assignment) return;
+          const hasStart = normalizedSlot.segments?.some((seg) => seg.start);
+          if (!hasStart) return;
+          dayMins += durationMins(normalizedSlot, day.dayName);
         });
-        khSlots.forEach((s) => {
-          dayMins += durationMins(
-            s.start,
-            s.end,
-            s.end_is_closing,
-            day.dayName
-          );
+        khSlots.forEach((slot, idx) => {
+          const normalizedSlot = withSegments(slot);
+          const assignment = assignedKH[idx];
+          if (!assignment) return;
+          const hasStart = normalizedSlot.segments?.some((seg) => seg.start);
+          if (!hasStart) return;
+          dayMins += durationMins(normalizedSlot, day.dayName);
         });
         return {
           dayName: day.dayName,
@@ -167,17 +165,12 @@ export default function ExportRosterButton({
               doc.addPage();
               yPosition = 18;
             }
-            let end = slot.end;
-            const isClosing = slot.end_is_closing;
-            if (isClosing) end = closingMap[day.dayName];
+            const normalizedSlot = withSegments(slot);
             const employeeName = assignedChefs[i]?.name || "Unassigned";
-            const timeLabel = slot.start
-              ? isClosing
-                ? `${String(slot.start).slice(0, 5)} - closing`
-                : `${String(slot.start).slice(0, 5)} - ${
-                    end ? String(end).slice(0, 5) : "--"
-                  }`
-              : "";
+            const timeLabel = formatSegmentsForDisplay(
+              normalizedSlot,
+              closingMap[day.dayName]
+            );
             const line = `- C${i + 1}  ${timeLabel}  ${employeeName}`;
             if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
             doc.text(line, 18, yPosition);
@@ -205,17 +198,12 @@ export default function ExportRosterButton({
               doc.addPage();
               yPosition = 18;
             }
-            let end = slot.end;
-            const isClosing = slot.end_is_closing;
-            if (isClosing) end = closingMap[day.dayName];
+            const normalizedSlot = withSegments(slot);
             const employeeName = assignedKH[i]?.name || "Unassigned";
-            const timeLabel = slot.start
-              ? isClosing
-                ? `${String(slot.start).slice(0, 5)} - closing`
-                : `${String(slot.start).slice(0, 5)} - ${
-                    end ? String(end).slice(0, 5) : "--"
-                  }`
-              : "";
+            const timeLabel = formatSegmentsForDisplay(
+              normalizedSlot,
+              closingMap[day.dayName]
+            );
             const line = `- KH${i + 1}  ${timeLabel}  ${employeeName}`;
             if (employeeName === "Unassigned") doc.setTextColor(150, 0, 0);
             doc.text(line, 18, yPosition);

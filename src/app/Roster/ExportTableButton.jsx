@@ -3,6 +3,12 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import jsPDF from "jspdf";
+import {
+  ensureSlotsArray,
+  formatSegmentsForDisplay,
+  slotSegmentsDurationMinutes,
+  withSegments,
+} from "@/lib/slot-utils";
 
 export default function ExportTableButton({
   weekDays,
@@ -26,25 +32,32 @@ export default function ExportTableButton({
         });
       }
 
+      const assignmentsByDayRole = {};
+      weekDays.forEach((day) => {
+        assignmentsByDayRole[day.date] = {
+          Chef: [],
+          "Kitchen Hand": [],
+        };
+      });
+
+      existing
+        .slice()
+        .sort((a, b) => (a.id || 0) - (b.id || 0))
+        .forEach((roster) => {
+          const dayAssignments = assignmentsByDayRole[roster.shift_date];
+          if (!dayAssignments || !roster.role) return;
+          if (!dayAssignments[roster.role]) return;
+          dayAssignments[roster.role].push(roster);
+        });
+
       // Helper functions
       function parseTimeToMins(str) {
         if (!str) return null;
         const [h, m] = str.split(":");
         return Number(h) * 60 + Number(m);
       }
-      function slotDurationMins(start, end, endIsClosing, closing) {
-        if (!start) return 0;
-        if (endIsClosing) {
-          if (!closing) return 0;
-          return parseTimeToMins(closing) - parseTimeToMins(start);
-        }
-        if (!end) return 0;
-        const s = parseTimeToMins(start);
-        const e = parseTimeToMins(end);
-        if (s == null || e == null) return 0;
-        let diff = e - s;
-        if (diff < 0) diff += 24 * 60;
-        return diff;
+      function slotDurationMins(slot, closing) {
+        return slotSegmentsDurationMinutes(slot, closing, parseTimeToMins);
       }
 
       const doc = new jsPDF("landscape", "mm", "a4");
@@ -86,19 +99,45 @@ export default function ExportTableButton({
         });
       });
 
-      // Fill in actual shifts
-      existing.forEach((roster) => {
-        if (employeeRosters[roster.employee_id]) {
-          const shiftTime = `${String(roster.shift_start).slice(0, 5)}-${String(
-            roster.shift_end
-          ).slice(0, 5)}`;
-          employeeRosters[roster.employee_id].week[
-            roster.shift_date
-          ].shifts.push({
-            role: roster.role,
-            time: shiftTime,
+      // Fill in actual shifts aligned with slots
+      weekDays.forEach((day) => {
+        const req = requirements[day.dayName] || {};
+        const chefSlots = ensureSlotsArray(req.chef_slots || []);
+        const khSlots = ensureSlotsArray(req.kitchen_slots || []);
+
+        const chefAssignments = assignmentsByDayRole[day.date]?.Chef || [];
+        const khAssignments =
+          assignmentsByDayRole[day.date]?.["Kitchen Hand"] || [];
+
+        chefSlots.forEach((slot, idx) => {
+          const normalizedSlot = withSegments(slot);
+          const assignment = chefAssignments[idx];
+          if (!assignment) return;
+          const employeeEntry = employeeRosters[assignment.employee_id];
+          if (!employeeEntry) return;
+          employeeEntry.week[day.date].shifts.push({
+            role: "Chef",
+            time: formatSegmentsForDisplay(
+              normalizedSlot,
+              closingMap[day.dayName]
+            ),
           });
-        }
+        });
+
+        khSlots.forEach((slot, idx) => {
+          const normalizedSlot = withSegments(slot);
+          const assignment = khAssignments[idx];
+          if (!assignment) return;
+          const employeeEntry = employeeRosters[assignment.employee_id];
+          if (!employeeEntry) return;
+          employeeEntry.week[day.date].shifts.push({
+            role: "Kitchen Hand",
+            time: formatSegmentsForDisplay(
+              normalizedSlot,
+              closingMap[day.dayName]
+            ),
+          });
+        });
       });
 
       // Compute per-day and week total hours based on actual assigned slots
@@ -108,46 +147,28 @@ export default function ExportTableButton({
       weekDays.forEach((day) => {
         let mins = 0;
         const req = reqMap[day.dayName] || {};
-        // Chef slots
-        (req.chef_slots || []).forEach((slot, i) => {
-          // Find if assigned
-          const assigned = existing.find(
-            (r) =>
-              r.shift_date === day.date &&
-              r.role === "Chef" &&
-              r.shift_start.startsWith((slot.start || "").slice(0, 5))
-          );
-          if (!assigned) return;
-          if (!slot.start) return;
-          let shiftEnd = slot.end;
-          let isClosing = slot.end_is_closing;
-          if (isClosing) shiftEnd = closingMap[day.dayName];
-          mins += slotDurationMins(
-            slot.start,
-            shiftEnd,
-            isClosing,
-            closingMap[day.dayName]
-          );
+        const chefSlots = ensureSlotsArray(req.chef_slots || []);
+        const kitchenSlots = ensureSlotsArray(req.kitchen_slots || []);
+        const chefAssignments = assignmentsByDayRole[day.date]?.Chef || [];
+        const kitchenAssignments =
+          assignmentsByDayRole[day.date]?.["Kitchen Hand"] || [];
+
+        chefSlots.forEach((slot, idx) => {
+          const normalizedSlot = withSegments(slot);
+          const assignment = chefAssignments[idx];
+          if (!assignment) return;
+          const hasStart = normalizedSlot.segments?.some((seg) => seg.start);
+          if (!hasStart) return;
+          mins += slotDurationMins(normalizedSlot, closingMap[day.dayName]);
         });
-        // Kitchen Hand slots
-        (req.kitchen_slots || []).forEach((slot, i) => {
-          const assigned = existing.find(
-            (r) =>
-              r.shift_date === day.date &&
-              r.role === "Kitchen Hand" &&
-              r.shift_start.startsWith((slot.start || "").slice(0, 5))
-          );
-          if (!assigned) return;
-          if (!slot.start) return;
-          let shiftEnd = slot.end;
-          let isClosing = slot.end_is_closing;
-          if (isClosing) shiftEnd = closingMap[day.dayName];
-          mins += slotDurationMins(
-            slot.start,
-            shiftEnd,
-            isClosing,
-            closingMap[day.dayName]
-          );
+
+        kitchenSlots.forEach((slot, idx) => {
+          const normalizedSlot = withSegments(slot);
+          const assignment = kitchenAssignments[idx];
+          if (!assignment) return;
+          const hasStart = normalizedSlot.segments?.some((seg) => seg.start);
+          if (!hasStart) return;
+          mins += slotDurationMins(normalizedSlot, closingMap[day.dayName]);
         });
         allDayTotals.push(mins / 60);
       });
@@ -204,70 +225,51 @@ export default function ExportTableButton({
           doc.rect(x, yPosition - 5, dayColumnWidth, rowHeight);
 
           const req = requirements[day.dayName] || {};
-          const chefSlots = req.chef_slots || [];
-          const khSlots = req.kitchen_slots || [];
+          const chefSlots = ensureSlotsArray(req.chef_slots || []);
+          const khSlots = ensureSlotsArray(req.kitchen_slots || []);
 
-          const chefAssignments = existing.filter(
-            (r) => r.shift_date === day.date && r.role === "Chef"
-          );
-          const khAssignments = existing.filter(
-            (r) => r.shift_date === day.date && r.role === "Kitchen Hand"
-          );
+          const chefAssignments = assignmentsByDayRole[day.date]?.Chef || [];
+          const khAssignments =
+            assignmentsByDayRole[day.date]?.["Kitchen Hand"] || [];
 
           const parts = [];
           // Chef slots by index
           chefSlots.forEach((slot, i) => {
+            const normalizedSlot = withSegments(slot);
             const assigned = chefAssignments[i];
             if (!assigned || assigned.employee_id !== emp.id) return;
-            let end = slot.end;
-            const isClosing = slot.end_is_closing;
-            if (isClosing) end = closingMap[day.dayName];
-            const label = slot.start
-              ? isClosing
-                ? `${String(slot.start).slice(0, 5)}-closing`
-                : `${String(slot.start).slice(0, 5)}-${
-                    end ? String(end).slice(0, 5) : "--"
-                  }`
-              : "";
+            const label = formatSegmentsForDisplay(
+              normalizedSlot,
+              closingMap[day.dayName]
+            );
             if (label) parts.push(label);
-            const mins = slot.start
-              ? slotDurationMins(
-                  slot.start,
-                  end,
-                  isClosing,
-                  closingMap[day.dayName]
-                )
-              : 0;
-            if (mins > 0)
-              (perDayTotals[colIdx] += mins / 60),
-                (weekTotalSlots += mins / 60);
+            const mins = slotDurationMins(
+              normalizedSlot,
+              closingMap[day.dayName]
+            );
+            if (mins > 0) {
+              perDayTotals[colIdx] += mins / 60;
+              weekTotalSlots += mins / 60;
+            }
           });
           // KH slots by index
           khSlots.forEach((slot, i) => {
+            const normalizedSlot = withSegments(slot);
             const assigned = khAssignments[i];
             if (!assigned || assigned.employee_id !== emp.id) return;
-            let end = slot.end;
-            const isClosing = slot.end_is_closing;
-            if (isClosing) end = closingMap[day.dayName];
-            const label = slot.start
-              ? isClosing
-                ? `${String(slot.start).slice(0, 5)}-closing`
-                : `${String(slot.start).slice(0, 5)}-${
-                    end ? String(end).slice(0, 5) : "--"
-                  }`
-              : "";
+            const label = formatSegmentsForDisplay(
+              normalizedSlot,
+              closingMap[day.dayName]
+            );
             if (label) parts.push(label);
-            const mins = slot.start
-              ? slotDurationMins(
-                  slot.start,
-                  end,
-                  isClosing,
-                  closingMap[day.dayName]
-                )
-              : 0;
-            if (mins > 0)
-              (perDayTotals[colIdx] += mins / 60),
-                (weekTotalSlots += mins / 60);
+            const mins = slotDurationMins(
+              normalizedSlot,
+              closingMap[day.dayName]
+            );
+            if (mins > 0) {
+              perDayTotals[colIdx] += mins / 60;
+              weekTotalSlots += mins / 60;
+            }
           });
 
           if (parts.length) {
