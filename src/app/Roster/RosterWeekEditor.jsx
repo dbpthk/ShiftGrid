@@ -70,7 +70,12 @@ export default function RosterWeekEditor({
       // Role compatibility check
       const empRole = emp.role.toLowerCase();
       if (role === "Chef") {
-        return empRole.includes("chef") || empRole.includes("head");
+        return (
+          empRole.includes("chef") ||
+          empRole.includes("head") ||
+          empRole.includes("kitchen") ||
+          empRole.includes("hand")
+        );
       } else if (role === "Kitchen Hand") {
         return (
           empRole.includes("chef") ||
