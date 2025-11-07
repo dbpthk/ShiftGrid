@@ -8,6 +8,7 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
   const router = useRouter();
   const [isEditing, setIsEditing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
   const [form, setForm] = React.useState({
     name: row.name || "",
     role: row.role || "",
@@ -55,6 +56,30 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
     }
   };
 
+  const onDelete = async () => {
+    if (deleting) return;
+    const ok = window.confirm(`Delete ${row.name || "this employee"}?`);
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/employees", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.ok && result?.success) {
+        router.refresh();
+      } else {
+        alert(result?.error || "Failed to delete");
+      }
+    } catch (error) {
+      alert("Network error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (!isEditing) {
     return (
       <tr>
@@ -95,10 +120,20 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
         <td className="hidden px-2 py-2 text-xs sm:table-cell sm:text-sm text-gray-500 sm:px-4">
           {new Date(row.created_at).toLocaleString()}
         </td>
-        <td className="px-10 py-2 text-right sm:px-4">
-          <Button size="sm" onClick={() => setIsEditing(true)}>
-            Edit
-          </Button>
+        <td className="px-2 py-2 text-right sm:px-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:justify-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+            <Button size="sm" onClick={() => setIsEditing(true)} disabled={deleting}>
+              Edit
+            </Button>
+          </div>
         </td>
       </tr>
     );

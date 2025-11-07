@@ -117,3 +117,38 @@ export async function PATCH(req) {
     );
   }
 }
+
+export async function DELETE(req) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const { id } = body || {};
+
+    if (!id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    await db
+      .delete(employee_availability)
+      .where(eq(employee_availability.employee_id, id));
+
+    const deleted = await db
+      .delete(employees)
+      .where(eq(employees.id, id))
+      .returning({ id: employees.id });
+
+    if (!deleted?.length) {
+      return NextResponse.json(
+        { error: "Employee not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("API Error:", error);
+    return NextResponse.json(
+      { error: "Failed to delete employee" },
+      { status: 500 }
+    );
+  }
+}

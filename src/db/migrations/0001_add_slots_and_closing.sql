@@ -15,3 +15,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS business_requirements_day_unique_idx
 --   CHECK (day_of_week IN ('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'));
 
 
+
+
