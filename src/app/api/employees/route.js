@@ -1,5 +1,5 @@
 import db from "./../../../db/index";
-import { employees, employee_availability } from "./../../../db/schema";
+import { employees, employee_availability, rosters } from "./../../../db/schema";
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 
@@ -123,17 +123,24 @@ export async function DELETE(req) {
     const body = await req.json().catch(() => ({}));
     const { id } = body || {};
 
-    if (!id) {
+    if (typeof id === "undefined" || id === null) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    const numericId = Number(id);
+    if (Number.isNaN(numericId)) {
+      return NextResponse.json({ error: "id must be a number" }, { status: 400 });
     }
 
     await db
       .delete(employee_availability)
-      .where(eq(employee_availability.employee_id, id));
+      .where(eq(employee_availability.employee_id, numericId));
+
+    await db.delete(rosters).where(eq(rosters.employee_id, numericId));
 
     const deleted = await db
       .delete(employees)
-      .where(eq(employees.id, id))
+      .where(eq(employees.id, numericId))
       .returning({ id: employees.id });
 
     if (!deleted?.length) {

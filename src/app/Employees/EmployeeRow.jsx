@@ -3,12 +3,25 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function EmployeeRow({ row, availabilityDays = [] }) {
   const router = useRouter();
   const [isEditing, setIsEditing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [form, setForm] = React.useState({
     name: row.name || "",
     role: row.role || "",
@@ -44,13 +57,14 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
       });
       const result = await res.json().catch(() => ({}));
       if (res.ok && result?.success) {
+        toast.success("Employee updated");
         router.refresh();
         setIsEditing(false);
       } else {
-        alert(result?.error || "Failed to update");
+        toast.error(result?.error || "Failed to update employee");
       }
     } catch (e) {
-      alert("Network error");
+      toast.error("Network error");
     } finally {
       setSaving(false);
     }
@@ -58,8 +72,6 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
 
   const onDelete = async () => {
     if (deleting) return;
-    const ok = window.confirm(`Delete ${row.name || "this employee"}?`);
-    if (!ok) return;
     setDeleting(true);
     try {
       const res = await fetch("/api/employees", {
@@ -69,12 +81,14 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
       });
       const result = await res.json().catch(() => ({}));
       if (res.ok && result?.success) {
+        toast.success("Employee deleted");
+        setDeleteOpen(false);
         router.refresh();
       } else {
-        alert(result?.error || "Failed to delete");
+        toast.error(result?.error || "Failed to delete employee");
       }
     } catch (error) {
-      alert("Network error");
+      toast.error("Network error");
     } finally {
       setDeleting(false);
     }
@@ -122,14 +136,31 @@ export default function EmployeeRow({ row, availabilityDays = [] }) {
         </td>
         <td className="px-2 py-2 text-right sm:px-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:justify-end">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={onDelete}
-              disabled={deleting}
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </Button>
+            <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={deleting}
+                >
+                  Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete employee</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action will permanently remove {row.name || "this employee"} and their availability.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={onDelete} disabled={deleting}>
+                    {deleting ? "Deleting..." : "Delete"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <Button size="sm" onClick={() => setIsEditing(true)} disabled={deleting}>
               Edit
             </Button>

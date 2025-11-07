@@ -1,6 +1,5 @@
 import db from "@/db";
 import { business_requirements } from "@/db/schema";
-import { desc } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import BusinessHoursCard from "./BusinessHoursCard";
 import RequirementRow from "./RequirementRow";
@@ -9,10 +8,24 @@ import BusinessRequirementForm from "./BusinessRequirementForm";
 export const dynamic = "force-dynamic";
 
 export default async function BusinessRequirementsPage() {
-  const rows = await db
-    .select()
-    .from(business_requirements)
-    .orderBy(desc(business_requirements.id));
+  const rawRows = await db.select().from(business_requirements);
+
+  const dayOrder = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+
+  const rows = rawRows.sort((a, b) => {
+    const aIndex = dayOrder.indexOf(a.day_of_week);
+    const bIndex = dayOrder.indexOf(b.day_of_week);
+    return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+  });
+
   const usedDays = rows.map((r) => r.day_of_week);
 
   return (
