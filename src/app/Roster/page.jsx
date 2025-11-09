@@ -15,14 +15,25 @@ export const dynamic = "force-dynamic";
 
 function normalizeWeekStart(startParam) {
   if (!startParam) return null;
-  const date = new Date(startParam);
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
+  const parts = startParam.split("-");
+  if (parts.length !== 3) return null;
+  const [yearStr, monthStr, dayStr] = parts;
+  const year = Number(yearStr);
+  const month = Number(monthStr) - 1;
+  const day = Number(dayStr);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
+    return null;
+  }
+  const date = new Date(year, month, day, 0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function toISODate(date) {
-  return date.toISOString().slice(0, 10);
-}
+const toLocalISO = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 export default async function RosterPage({ searchParams }) {
   const today = new Date();
@@ -39,7 +50,7 @@ export default async function RosterPage({ searchParams }) {
   const weekDays = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    const iso = toISODate(d);
+    const iso = toLocalISO(d);
     const dayName = d.toLocaleDateString(undefined, { weekday: "long" });
     return { date: iso, dayName };
   });
@@ -84,12 +95,15 @@ export default async function RosterPage({ searchParams }) {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle className="text-2xl">
+        <CardHeader className="px-6 py-6 shadow-sm">
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+            <div className="text-center sm:text-left">
+              <CardTitle className="text-3xl font-semibold tracking-wide drop-shadow-sm">
                 Roster — {weekStartIso} to {weekEndIso}
               </CardTitle>
+              <p className="mt-1 text-sm font-medium text-gray-600">
+                Manage this week's split shifts and assignments
+              </p>
             </div>
             <RosterWeekNavigator initialStart={weekStartIso} />
           </div>

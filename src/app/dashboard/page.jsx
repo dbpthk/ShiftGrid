@@ -201,7 +201,6 @@ export default async function Dashboard({ searchParams }) {
               <ExportTableButton
                 weekDays={weekDays}
                 employees={allEmployees}
-                employeeAvailability={employeeAvailability}
                 requirements={requirements}
                 existing={existingRosters}
               />

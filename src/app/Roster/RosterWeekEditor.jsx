@@ -323,11 +323,13 @@ export default function RosterWeekEditor({
   const weekTotal = dayHours.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {weekLabel ? (
-        <div className="text-sm font-medium text-gray-700">Week: {weekLabel}</div>
+        <div className="text-base font-semibold text-gray-700 text-center sm:text-left tracking-wide">
+          Week: {weekLabel}
+        </div>
       ) : null}
-      <div className="text-right text-xs text-gray-600 font-semibold">
+      <div className="text-right text-base text-gray-700 font-semibold">
         TOTAL ROSTERED HOURS FOR WEEK: {weekTotal.toFixed(1)}
       </div>
       {weekDays.map((day, dayIdx) => {
@@ -338,15 +340,17 @@ export default function RosterWeekEditor({
         return (
           <div
             key={day.date}
-            className="rounded-lg border border-gray-200 mb-4"
+            className="rounded-xl border border-gray-200 mb-8 shadow-sm overflow-hidden"
           >
-            <div className="border-b px-4 py-2 text-sm font-medium text-gray-800">
-              {day.dayName} — {day.date}
-              <span className="ml-2 text-xs font-normal text-gray-500">
+            <div className="border-b px-8 py-4 text-lg font-semibold text-gray-900 uppercase tracking-wide bg-white">
+              <span>
+                {day.dayName} — {day.date}
+              </span>
+              <span className="ml-4 text-sm font-medium text-gray-900 drop-shadow-sm">
                 Total Hours: {dayHours[dayIdx].toFixed(1)}
               </span>
             </div>
-            <div className="grid gap-4 p-4 sm:grid-cols-2">
+            <div className="grid gap-8 p-8 sm:grid-cols-2">
               {[
                 {
                   label: "Chef",
@@ -360,11 +364,11 @@ export default function RosterWeekEditor({
                   ),
                 },
               ].map(({ label, slots }) => (
-                <div key={label} className="space-y-3">
-                  <div className="text-sm font-medium text-gray-700">
+                <div key={label} className="space-y-5">
+                  <div className="text-lg font-semibold text-gray-900 tracking-wide">
                     {label} ({slots.length})
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-5">
                     {slots.map((slot, slotIdx) => {
                       const segments = slot.segments || [];
                       const slotAssignments = Array.isArray(
@@ -380,17 +384,17 @@ export default function RosterWeekEditor({
                       return (
                         <div
                           key={`${label}-${slotIdx}`}
-                          className="rounded-md border border-gray-200 p-3 space-y-3"
+                          className="rounded-xl border border-gray-200 bg-white p-5 space-y-4 shadow-sm ring-1 ring-gray-100"
                         >
-                          <div className="text-[11px] font-semibold uppercase text-gray-600">
+                          <div className="text-xs font-bold uppercase text-gray-700 tracking-wider">
                             {label === "Chef" ? `Chef ${slotIdx + 1}` : `KH ${slotIdx + 1}`}
                             {slotHeader && (
-                              <span className="ml-2 text-gray-400 normal-case">
+                              <span className="ml-3 text-sm font-medium text-gray-500 normal-case">
                                 {slotHeader}
                               </span>
                             )}
                           </div>
-                          <div className="space-y-2">
+                          <div className="space-y-3">
                             {segments.map((segment, segIdx) => {
                               const segmentLabel =
                                 segments.length > 1 ? `Segment ${segIdx + 1}` : "Shift";
@@ -431,12 +435,14 @@ export default function RosterWeekEditor({
                               return (
                                 <div
                                   key={`${label}-${slotIdx}-segment-${segIdx}`}
-                                  className="space-y-1"
+                                  className="space-y-2"
                                 >
-                                  <label className="block text-[11px] text-gray-500">
-                                    {segmentLabel}
+                                  <label className="block text-xs font-semibold text-gray-600">
+                                    <span className="mr-3 uppercase tracking-wide">
+                                      {segmentLabel}
+                                    </span>
                                     {segmentTime && (
-                                      <span className="ml-2 text-gray-400">
+                                      <span className="text-gray-500">
                                         {segmentTime}
                                       </span>
                                     )}
@@ -456,7 +462,7 @@ export default function RosterWeekEditor({
                                         e.target.value
                                       )
                                     }
-                                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-900 shadow-sm focus:border-gray-500 focus:outline-none"
+                                    className="block w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 shadow focus:border-[#008C45] focus:outline-none"
                                   >
                                     <option value="">Unassigned</option>
                                     {availableEmployees.map((emp) => {
@@ -494,7 +500,11 @@ export default function RosterWeekEditor({
       })}
 
       <div className="flex justify-end">
-        <Button onClick={onSave} disabled={saving}>
+        <Button
+          onClick={onSave}
+          disabled={saving}
+          className="px-6 py-3 text-sm font-semibold"
+        >
           {saving ? "Saving..." : "Save Week"}
         </Button>
       </div>

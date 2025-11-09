@@ -2,26 +2,43 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
-import jsPDF from "jspdf";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 import {
   createSlotArray,
   formatSegmentsForDisplay,
   mapRosterEntriesToSlots,
 } from "@/lib/slot-utils";
 
+const BUSINESS_TITLE =
+  process.env.NEXT_PUBLIC_BUSINESS_NAME || "Granata's Liverpool";
+
 export default function ExportTableButton({
   weekDays,
   employees,
-  employeeAvailability,
   requirements,
   existing,
 }) {
   const [isExporting, setIsExporting] = React.useState(false);
 
-  const generateTablePDF = async () => {
+  const downloadExcel = async () => {
+    const titleInput = window.prompt(
+      "Enter a title for the exported roster",
+      BUSINESS_TITLE
+    );
+    if (titleInput === null) {
+      return;
+    }
+    const title = titleInput.trim() || BUSINESS_TITLE;
+
+    const dateLabelInput = window.prompt(
+      "Enter a subtitle/date range for the roster",
+      ""
+    );
+    const dateLabel = (dateLabelInput || "").trim();
+
     setIsExporting(true);
     try {
-      // Fetch business_hours for closing times
       const businessHoursRes = await fetch("/api/business-hours");
       const businessHoursData = await businessHoursRes.json();
       const closingMap = {};
@@ -33,10 +50,7 @@ export default function ExportTableButton({
 
       const assignmentsByDayRole = {};
       weekDays.forEach((day) => {
-        assignmentsByDayRole[day.date] = {
-          Chef: [],
-          "Kitchen Hand": [],
-        };
+        assignmentsByDayRole[day.date] = { Chef: [], "Kitchen Hand": [] };
       });
 
       const sortedExisting = existing
@@ -60,148 +74,82 @@ export default function ExportTableButton({
       sortedExisting.forEach((roster) => {
         const dayAssignments = assignmentsByDayRole[roster.shift_date];
         if (!dayAssignments || !roster.role) return;
-        if (!dayAssignments[roster.role]) return;
-        dayAssignments[roster.role].push(roster);
+        dayAssignments[roster.role]?.push(roster);
       });
 
-      // Helper functions
-      const parseTimeToMins = (str) => {
-        if (!str) return null;
-        const [h, m] = str.split(":");
-        return Number(h) * 60 + Number(m);
-      };
-      function slotDurationMins(slot, closing) {
-        return slotSegmentsDurationMinutes(slot, closing, parseTimeToMins);
-      }
+      const startDate = new Date(weekDays[0].date);
+      const endDate = new Date(weekDays[6].date);
+      const totalColumns = weekDays.length + 1;
 
-      const doc = new jsPDF("landscape", "mm", "a4");
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      let yPosition = 20;
-
-      // Title
-      doc.setFontSize(24);
-      doc.setFont("helvetica", "bold");
-      doc.text("SHIFTGRID", pageWidth / 2, yPosition, { align: "center" });
-      yPosition += 15;
-
-      // Date range
-      const startDate = new Date(weekDays[0].date).toLocaleDateString();
-      const endDate = new Date(weekDays[6].date).toLocaleDateString();
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "normal");
-      doc.text(`${startDate} - ${endDate}`, pageWidth / 2, yPosition, {
-        align: "center",
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "ShiftGrid";
+      workbook.created = new Date();
+      const worksheet = workbook.addWorksheet("Roster", {
+        properties: { defaultRowHeight: 32 },
+        views: [{ state: "frozen", ySplit: 4 }],
+        pageSetup: { paperSize: 9, orientation: "landscape" },
       });
-      yPosition += 20;
 
-      // Group rosters by day and employee
-      const employeeRosters = {};
-      const allEmployeeIds = new Set();
-
-      // Initialize all employees
-      employees.forEach((emp) => {
-        allEmployeeIds.add(emp.id);
-        employeeRosters[emp.id] = {
-          name: emp.name,
-          week: {},
-        };
-        weekDays.forEach((day) => {
-          employeeRosters[emp.id].week[day.date] = {
-            shifts: [],
+      const columnDefinitions = [
+        { header: "NAME", key: "name", width: 24 },
+        ...weekDays.map((day) => {
+          return {
+            header: day.dayName.slice(0, 3).toUpperCase(),
+            key: day.date,
+            width: 18,
           };
-        });
+        }),
+      ];
+      worksheet.columns = columnDefinitions;
+
+      const titleRow = worksheet.addRow([title.toUpperCase()]);
+      worksheet.mergeCells(1, 1, 1, totalColumns);
+      titleRow.height = 30;
+      titleRow.font = { name: "Calibri", bold: true, size: 22 };
+      titleRow.alignment = { horizontal: "center", vertical: "middle" };
+
+      const defaultDateRange = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
+      const dateRow = worksheet.addRow([
+        dateLabel || defaultDateRange,
+      ]);
+      worksheet.mergeCells(2, 1, 2, totalColumns);
+      dateRow.height = 24;
+      dateRow.font = { name: "Calibri", italic: true, size: 13 };
+      dateRow.alignment = { horizontal: "center", vertical: "middle" };
+
+      worksheet.addRow([]);
+
+      const headerRow = worksheet.addRow(
+        columnDefinitions.map((column) =>
+          column.key === "name" ? "NAME" : column.header.split(" ")[0]
+        )
+      );
+      headerRow.height = 28;
+
+      headerRow.eachCell((cell, colNumber) => {
+        cell.font = {
+          name: "Calibri",
+          bold: true,
+          size: 12,
+          color: { argb: "333333" },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = {
+          top: { style: "thin", color: { argb: "444444" } },
+          bottom: { style: "thin", color: { argb: "444444" } },
+          left: { style: "thin", color: { argb: "444444" } },
+          right: { style: "thin", color: { argb: "444444" } },
+        };
       });
 
-      // Fill in actual shifts aligned with slots
-      weekDays.forEach((day) => {
+      const resolveCellValue = (day, employeeId) => {
         const req = requirements[day.dayName] || {};
-        const chefSlots = createSlotArray(req.chef_slots, req.required_chefs);
-        const khSlots = createSlotArray(
-          req.kitchen_slots,
-          req.required_kitchen_hands
-        );
-
-        const chefAssignments = mapRosterEntriesToSlots(
-          chefSlots,
-          assignmentsByDayRole[day.date]?.Chef || []
-        );
-        const khAssignments = mapRosterEntriesToSlots(
-          khSlots,
-          assignmentsByDayRole[day.date]?.["Kitchen Hand"] || []
-        );
-
-        chefSlots.forEach((slot, slotIdx) => {
-          const segments = slot.segments || [];
-          const assignments = Array.isArray(chefAssignments?.[slotIdx])
-            ? chefAssignments[slotIdx]
-            : [];
-          segments.forEach((segment, segIdx) => {
-            const entry = assignments[segIdx];
-            if (!entry) return;
-            const employeeEntry = employeeRosters[entry.employee_id];
-            if (!employeeEntry) return;
-            employeeEntry.week[day.date].shifts.push({
-              role: "Chef",
-              time: formatSegmentsForDisplay(
-                { segments: [segment] },
-                closingMap[day.dayName]
-              ),
-            });
-          });
-        });
-
-        khSlots.forEach((slot, slotIdx) => {
-          const segments = slot.segments || [];
-          const assignments = Array.isArray(khAssignments?.[slotIdx])
-            ? khAssignments[slotIdx]
-            : [];
-          segments.forEach((segment, segIdx) => {
-            const entry = assignments[segIdx];
-            if (!entry) return;
-            const employeeEntry = employeeRosters[entry.employee_id];
-            if (!employeeEntry) return;
-            employeeEntry.week[day.date].shifts.push({
-              role: "Kitchen Hand",
-              time: formatSegmentsForDisplay(
-                { segments: [segment] },
-                closingMap[day.dayName]
-              ),
-            });
-          });
-        });
-      });
-
-      // Compute per-day and week total hours based on actual assigned segments
-      const calcSegmentMinutes = (segments, closingTime, assignments) => {
-        if (!Array.isArray(segments)) return 0;
-        let mins = 0;
-        segments.forEach((segment, idx) => {
-          const entry = assignments?.[idx];
-          if (!entry || !segment?.start) return;
-          const start = parseTimeToMins(segment.start);
-          if (start == null) return;
-          const end = segment.end_is_closing
-            ? parseTimeToMins(closingTime)
-            : parseTimeToMins(segment.end);
-          if (end == null) return;
-          let diff = end - start;
-          if (diff < 0) diff += 24 * 60;
-          mins += diff;
-        });
-        return mins;
-      };
-
-      const reqMap = requirements;
-      const allDayTotals = [];
-      weekDays.forEach((day) => {
-        const req = reqMap[day.dayName] || {};
-        const closingTime = closingMap[day.dayName];
         const chefSlots = createSlotArray(req.chef_slots, req.required_chefs);
         const kitchenSlots = createSlotArray(
           req.kitchen_slots,
           req.required_kitchen_hands
         );
+
         const chefAssignments = mapRosterEntriesToSlots(
           chefSlots,
           assignmentsByDayRole[day.date]?.Chef || []
@@ -211,168 +159,79 @@ export default function ExportTableButton({
           assignmentsByDayRole[day.date]?.["Kitchen Hand"] || []
         );
 
-        let mins = 0;
-        chefSlots.forEach((slot, idx) => {
-          mins += calcSegmentMinutes(
-            slot.segments,
-            closingTime,
-            chefAssignments[idx]
-          );
-        });
-        kitchenSlots.forEach((slot, idx) => {
-          mins += calcSegmentMinutes(
-            slot.segments,
-            closingTime,
-            kitchenAssignments[idx]
-          );
-        });
-        allDayTotals.push(mins / 60);
-      });
-      const weekTotal = allDayTotals.reduce((a, b) => a + b, 0);
+        const segments = [];
 
-      // Table setup
-      const tableStartX = 20;
-      const nameColumnWidth = 30;
-      const dayColumnWidth = (pageWidth - 20 - nameColumnWidth) / 7;
-      const rowHeight = 8;
-
-      // Draw table headers
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-
-      // NAME header
-      doc.rect(tableStartX, yPosition - 5, nameColumnWidth, rowHeight);
-      doc.text("NAME", tableStartX + 2, yPosition);
-
-      // Day headers
-      weekDays.forEach((day, index) => {
-        const x = tableStartX + nameColumnWidth + index * dayColumnWidth;
-        doc.rect(x, yPosition - 5, dayColumnWidth, rowHeight);
-
-        // Day name
-        doc.setFontSize(8);
-        doc.text(day.dayName.toUpperCase(), x + 1, yPosition - 2);
-
-        // Date
-        const date = new Date(day.date).getDate();
-        doc.text(date.toString(), x + 1, yPosition + 2);
-      });
-
-      yPosition += rowHeight;
-
-      // Build rows per employee (first column is NAME)
-      let perDayTotals = Array(7).fill(0);
-      let weekTotalSlots = 0;
-
-      employees.forEach((emp) => {
-        // new page if needed
-        if (yPosition > pageHeight - 20) {
-          doc.addPage();
-          yPosition = 20;
-          // redraw headers row (optional: skipping for brevity)
-        }
-        // Draw name cell
-        doc.rect(tableStartX, yPosition - 5, nameColumnWidth, rowHeight);
-        doc.text(String(emp.name).toUpperCase(), tableStartX + 2, yPosition);
-
-        // Day cells
-        weekDays.forEach((day, colIdx) => {
-          const x = tableStartX + nameColumnWidth + colIdx * dayColumnWidth;
-          doc.rect(x, yPosition - 5, dayColumnWidth, rowHeight);
-
-          const req = requirements[day.dayName] || {};
-          const chefSlots = createSlotArray(
-            req.chef_slots,
-            req.required_chefs
-          );
-          const khSlots = createSlotArray(
-            req.kitchen_slots,
-            req.required_kitchen_hands
-          );
-
-          const chefAssignments = mapRosterEntriesToSlots(
-            chefSlots,
-            assignmentsByDayRole[day.date]?.Chef || []
-          );
-          const khAssignments = mapRosterEntriesToSlots(
-            khSlots,
-            assignmentsByDayRole[day.date]?.["Kitchen Hand"] || []
-          );
-
-          const parts = [];
-          const accumulate = (slot, assignmentGroup) => {
-            const segments = slot?.segments || [];
-            segments.forEach((segment, segIdx) => {
-              const entry = assignmentGroup?.[segIdx];
-              if (!entry || entry.employee_id !== emp.id) return;
-              const label = formatSegmentsForDisplay(
+        chefSlots.forEach((slot, slotIdx) => {
+          const assignments = chefAssignments[slotIdx];
+          slot?.segments?.forEach((segment, segIdx) => {
+            const entry = assignments?.[segIdx];
+            if (!entry || entry.employee_id !== employeeId) return;
+            segments.push(
+              formatSegmentsForDisplay(
                 { segments: [segment] },
                 closingMap[day.dayName]
-              );
-              if (label) parts.push(label);
-              const start = parseTimeToMins(segment.start);
-              if (start == null) return;
-              const end = segment.end_is_closing
-                ? parseTimeToMins(closingMap[day.dayName])
-                : parseTimeToMins(segment.end);
-              if (end == null) return;
-              let diff = end - start;
-              if (diff < 0) diff += 24 * 60;
-              perDayTotals[colIdx] += diff / 60;
-              weekTotalSlots += diff / 60;
-            });
-          };
-
-          chefSlots.forEach((slot, i) => {
-            accumulate(slot, chefAssignments[i]);
+              )
+            );
           });
-          khSlots.forEach((slot, i) => {
-            accumulate(slot, khAssignments[i]);
-          });
-
-          if (parts.length) {
-            doc.text(parts.join(", "), x + 2, yPosition);
-          }
         });
 
-        yPosition += rowHeight;
-      });
+        kitchenSlots.forEach((slot, slotIdx) => {
+          const assignments = kitchenAssignments[slotIdx];
+          slot?.segments?.forEach((segment, segIdx) => {
+            const entry = assignments?.[segIdx];
+            if (!entry || entry.employee_id !== employeeId) return;
+            segments.push(
+              formatSegmentsForDisplay(
+                { segments: [segment] },
+                closingMap[day.dayName]
+              )
+            );
+          });
+        });
 
-      // Per-day totals and week total
-      if (yPosition > pageHeight - 15) {
-        doc.addPage();
-        yPosition = 20;
-      }
-      doc.setFont("helvetica", "bold");
-      doc.text("TOTAL HRS", tableStartX + 2, yPosition);
-      weekDays.forEach((day, index) => {
-        const x = tableStartX + nameColumnWidth + index * dayColumnWidth;
-        doc.text(perDayTotals[index].toFixed(1), x + 1, yPosition);
-      });
-      yPosition += rowHeight + 2;
-      doc.text(
-        `TOTAL ROSTERED HOURS FOR WEEK: ${weekTotalSlots.toFixed(1)}`,
-        tableStartX,
-        yPosition
+        return segments.length ? segments.join("\n") : "off";
+      };
+
+      const sortedEmployees = [...employees].sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+          sensitivity: "base",
+        })
       );
 
-      // Footer
-      const footerY = pageHeight - 10;
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.text(
-        `Generated on ${new Date().toLocaleString()}`,
-        pageWidth / 2,
-        footerY,
-        { align: "center" }
-      );
+      sortedEmployees.forEach((employee) => {
+        const row = worksheet.addRow([
+          String(employee.name).toUpperCase(),
+          ...weekDays.map((day) => resolveCellValue(day, employee.id)),
+        ]);
+        row.height = 36;
+        row.eachCell((cell, colNumber) => {
+          cell.font = { name: "Calibri", size: 11 };
+          cell.alignment = {
+            vertical: "top",
+            horizontal: colNumber === 1 ? "left" : "center",
+            wrapText: true,
+          };
+          cell.border = {
+            top: { style: "thin", color: { argb: "CCCCCC" } },
+            bottom: { style: "thin", color: { argb: "CCCCCC" } },
+            left: { style: "thin", color: { argb: "CCCCCC" } },
+            right: { style: "thin", color: { argb: "CCCCCC" } },
+          };
+          if (cell.value === "off") {
+            cell.font = { name: "Calibri", size: 11, color: { argb: "888888" } };
+          }
+        });
+      });
 
-      // Save the PDF
-      const fileName = `roster-table-${weekDays[0].date}-to-${weekDays[6].date}.pdf`;
-      doc.save(fileName);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const fileName = `roster-${weekDays[0].date}-to-${weekDays[6].date}.xlsx`;
+      saveAs(blob, fileName);
     } catch (error) {
-      console.error("Error generating PDF:", error);
-      alert("Error generating PDF. Please try again.");
+      console.error("Error generating Excel:", error);
+      alert("Error generating Excel. Please try again.");
     } finally {
       setIsExporting(false);
     }
@@ -380,20 +239,20 @@ export default function ExportTableButton({
 
   return (
     <Button
-      onClick={generateTablePDF}
+      onClick={downloadExcel}
       disabled={isExporting}
       variant="outline"
       className="flex items-center gap-2"
     >
       {isExporting ? (
         <>
-          <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
           Exporting...
         </>
       ) : (
         <>
           <svg
-            className="w-4 h-4"
+            className="h-4 w-4"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -402,7 +261,7 @@ export default function ExportTableButton({
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h2a2 2 0 002-2z"
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
             />
           </svg>
           Export Table

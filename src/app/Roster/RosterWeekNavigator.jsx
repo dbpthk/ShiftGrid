@@ -12,7 +12,10 @@ function normalizeToMonday(value) {
   const mondayOffset = day === 0 ? -6 : 1 - day;
   date.setDate(date.getDate() + mondayOffset);
   date.setHours(0, 0, 0, 0);
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const dayOfMonth = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${dayOfMonth}`;
 }
 
 export default function RosterWeekNavigator({ initialStart }) {
@@ -28,11 +31,13 @@ export default function RosterWeekNavigator({ initialStart }) {
     event.preventDefault();
     if (!value) return;
     const normalized = normalizeToMonday(value);
+    setValue(normalized);
     const params = new URLSearchParams(window.location.search);
     params.set("weekStart", normalized);
     const href = `/Roster?${params.toString()}`;
     startTransition(() => {
       router.replace(href);
+      router.refresh();
     });
   };
 
