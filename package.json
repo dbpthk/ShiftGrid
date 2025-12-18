@@ -28,11 +28,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.3",
     "lucide-react": "^0.548.0",
-<<<<<<< HEAD
-    "next": "16.0.10",
-=======
     "next": "^16.0.1",
->>>>>>> db32955 (fix: upgrade react and react-dom to 19.2.1 to patch critical RSC vulnerability)
     "next-themes": "^0.4.6",
     "react": "^19.2.1",
     "react-day-picker": "^9.11.1",
