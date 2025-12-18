@@ -17,38 +17,41 @@ export default function RosterWeekEditor({
   employeeAvailability,
   requirements,
   existing,
-  weekLabel,
+  weekStartIso,
 }) {
   const router = useRouter();
   const [saving, setSaving] = React.useState(false);
 
   // Build map for existing roster: key = date|role|index -> roster row or null
-  const existingMap = new Map();
-  const sortedExisting = Array.isArray(existing)
-    ? [...existing].sort((a, b) => {
-        const dateCompare = String(a.shift_date).localeCompare(
-          String(b.shift_date)
-        );
-        if (dateCompare !== 0) return dateCompare;
-        const roleCompare = String(a.role || "").localeCompare(
-          String(b.role || "")
-        );
-        if (roleCompare !== 0) return roleCompare;
-        const startCompare = String(a.shift_start || "").localeCompare(
-          String(b.shift_start || "")
-        );
-        if (startCompare !== 0) return startCompare;
-        return (a.id || 0) - (b.id || 0);
-      })
-    : [];
-  for (const r of sortedExisting) {
-    const key = `${r.shift_date}|${r.role || ""}`;
-    if (!existingMap.has(key)) existingMap.set(key, []);
-    existingMap.get(key).push(r);
-  }
+  const existingMap = React.useMemo(() => {
+    const map = new Map();
+    const sortedExisting = Array.isArray(existing)
+      ? [...existing].sort((a, b) => {
+          const dateCompare = String(a.shift_date).localeCompare(
+            String(b.shift_date)
+          );
+          if (dateCompare !== 0) return dateCompare;
+          const roleCompare = String(a.role || "").localeCompare(
+            String(b.role || "")
+          );
+          if (roleCompare !== 0) return roleCompare;
+          const startCompare = String(a.shift_start || "").localeCompare(
+            String(b.shift_start || "")
+          );
+          if (startCompare !== 0) return startCompare;
+          return (a.id || 0) - (b.id || 0);
+        })
+      : [];
+    for (const r of sortedExisting) {
+      const key = `${r.shift_date}|${r.role || ""}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    }
+    return map;
+  }, [existing]);
 
-  const [state, setState] = React.useState(() => {
-    const s = {};
+  const initialState = React.useMemo(() => {
+    const assignments = {};
     for (const day of weekDays) {
       const req = requirements[day.dayName] || {
         required_chefs: 0,
@@ -72,21 +75,27 @@ export default function RosterWeekEditor({
         existingMap.get(`${day.date}|Kitchen Hand`) || []
       );
 
-      s[day.date] = {
+      assignments[day.date] = {
         Chef: chefEntryGroups.map((group) =>
           Array.isArray(group)
-            ? group.map((entry) => entry?.employee_id ?? null)
+            ? group.map((entry) => (entry && entry.employee_id) ?? null)
             : []
         ),
         "Kitchen Hand": kitchenEntryGroups.map((group) =>
           Array.isArray(group)
-            ? group.map((entry) => entry?.employee_id ?? null)
+            ? group.map((entry) => (entry && entry.employee_id) ?? null)
             : []
         ),
       };
     }
-    return s;
-  });
+    return assignments;
+  }, [weekDays, requirements, existingMap]);
+
+  const [state, setState] = React.useState(initialState);
+
+  React.useEffect(() => {
+    setState(initialState);
+  }, [initialState]);
 
   const handleChange = (date, role, slotIdx, segmentIdx, value) => {
     setState((prev) => {
@@ -322,13 +331,11 @@ export default function RosterWeekEditor({
   });
   const weekTotal = dayHours.reduce((a, b) => a + b, 0);
 
+  const componentKey =
+    weekStartIso || (weekDays[0] ? weekDays[0].date : "week");
+
   return (
-    <div className="space-y-8">
-      {weekLabel ? (
-        <div className="text-base font-semibold text-gray-700 text-center sm:text-left tracking-wide">
-          Week: {weekLabel}
-        </div>
-      ) : null}
+    <div key={componentKey} className="space-y-8">
       <div className="text-right text-base text-gray-700 font-semibold">
         TOTAL ROSTERED HOURS FOR WEEK: {weekTotal.toFixed(1)}
       </div>
@@ -343,9 +350,7 @@ export default function RosterWeekEditor({
             className="rounded-xl border border-gray-200 mb-8 shadow-sm overflow-hidden"
           >
             <div className="border-b px-8 py-4 text-lg font-semibold text-gray-900 uppercase tracking-wide bg-white">
-              <span>
-                {day.dayName} — {day.date}
-              </span>
+              <span>{day.dayName}</span>
               <span className="ml-4 text-sm font-medium text-gray-900 drop-shadow-sm">
                 Total Hours: {dayHours[dayIdx].toFixed(1)}
               </span>
@@ -387,7 +392,9 @@ export default function RosterWeekEditor({
                           className="rounded-xl border border-gray-200 bg-white p-5 space-y-4 shadow-sm ring-1 ring-gray-100"
                         >
                           <div className="text-xs font-bold uppercase text-gray-700 tracking-wider">
-                            {label === "Chef" ? `Chef ${slotIdx + 1}` : `KH ${slotIdx + 1}`}
+                            {label === "Chef"
+                              ? `Chef ${slotIdx + 1}`
+                              : `KH ${slotIdx + 1}`}
                             {slotHeader && (
                               <span className="ml-3 text-sm font-medium text-gray-500 normal-case">
                                 {slotHeader}
@@ -397,7 +404,9 @@ export default function RosterWeekEditor({
                           <div className="space-y-3">
                             {segments.map((segment, segIdx) => {
                               const segmentLabel =
-                                segments.length > 1 ? `Segment ${segIdx + 1}` : "Shift";
+                                segments.length > 1
+                                  ? `Segment ${segIdx + 1}`
+                                  : "Shift";
                               const segmentTime = formatSegmentsForDisplay(
                                 { segments: [segment] },
                                 closingMap[day.dayName]
@@ -466,7 +475,9 @@ export default function RosterWeekEditor({
                                   >
                                     <option value="">Unassigned</option>
                                     {availableEmployees.map((emp) => {
-                                      const isAssigned = assignedIds.includes(emp.id);
+                                      const isAssigned = assignedIds.includes(
+                                        emp.id
+                                      );
                                       return (
                                         <option
                                           key={emp.id}
@@ -474,7 +485,9 @@ export default function RosterWeekEditor({
                                           disabled={isAssigned}
                                         >
                                           {emp.name} ({emp.role})
-                                          {isAssigned ? " (already assigned)" : ""}
+                                          {isAssigned
+                                            ? " (already assigned)"
+                                            : ""}
                                         </option>
                                       );
                                     })}

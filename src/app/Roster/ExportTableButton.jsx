@@ -79,6 +79,7 @@ export default function ExportTableButton({
 
       const startDate = new Date(weekDays[0].date);
       const endDate = new Date(weekDays[6].date);
+
       const totalColumns = weekDays.length + 1;
 
       const workbook = new ExcelJS.Workbook();
@@ -107,6 +108,7 @@ export default function ExportTableButton({
       titleRow.height = 30;
       titleRow.font = { name: "Calibri", bold: true, size: 22 };
       titleRow.alignment = { horizontal: "center", vertical: "middle" };
+      titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
 
       const defaultDateRange = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
       const dateRow = worksheet.addRow([
@@ -116,17 +118,19 @@ export default function ExportTableButton({
       dateRow.height = 24;
       dateRow.font = { name: "Calibri", italic: true, size: 13 };
       dateRow.alignment = { horizontal: "center", vertical: "middle" };
+      dateRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
 
       worksheet.addRow([]);
 
-      const headerRow = worksheet.addRow(
-        columnDefinitions.map((column) =>
-          column.key === "name" ? "NAME" : column.header.split(" ")[0]
-        )
-      );
-      headerRow.height = 28;
+      const headerValues = [
+        "NAME",
+        ...weekDays.map((day) => {
+          return `${day.dayName.slice(0, 3).toUpperCase()}`;
+        }),
+      ];
+      const headerRow = worksheet.addRow(headerValues);
 
-      headerRow.eachCell((cell, colNumber) => {
+      headerRow.eachCell((cell) => {
         cell.font = {
           name: "Calibri",
           bold: true,
@@ -141,6 +145,36 @@ export default function ExportTableButton({
           right: { style: "thin", color: { argb: "444444" } },
         };
       });
+
+      const hasNotes = weekDays.some((day) => {
+        const note = requirements[day.dayName]?.notes;
+        return Boolean(note && note.trim());
+      });
+
+      if (hasNotes) {
+        const notesRowValues = [
+          "",
+          ...weekDays.map((day) => requirements[day.dayName]?.notes || ""),
+        ];
+        const notesRow = worksheet.addRow(notesRowValues);
+        notesRow.height = 24;
+        notesRow.eachCell((cell, colNumber) => {
+          cell.font = { name: "Calibri", size: 10, italic: true, color: { argb: "555555" } };
+          cell.alignment = {
+            vertical: "top",
+            horizontal: colNumber === 1 ? "left" : "left",
+            wrapText: true,
+          };
+          if (colNumber > 1) {
+            cell.border = {
+              top: { style: "dotted", color: { argb: "CCCCCC" } },
+              bottom: { style: "dotted", color: { argb: "CCCCCC" } },
+              left: { style: "dotted", color: { argb: "CCCCCC" } },
+              right: { style: "dotted", color: { argb: "CCCCCC" } },
+            };
+          }
+        });
+      }
 
       const resolveCellValue = (day, employeeId) => {
         const req = requirements[day.dayName] || {};
@@ -199,10 +233,11 @@ export default function ExportTableButton({
       );
 
       sortedEmployees.forEach((employee) => {
-        const row = worksheet.addRow([
+        const rowValues = [
           String(employee.name).toUpperCase(),
           ...weekDays.map((day) => resolveCellValue(day, employee.id)),
-        ]);
+        ];
+        const row = worksheet.addRow(rowValues);
         row.height = 36;
         row.eachCell((cell, colNumber) => {
           cell.font = { name: "Calibri", size: 11 };

@@ -3,6 +3,7 @@ import { business_requirements } from "./../../../db/schema";
 import { NextResponse } from "next/server";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { ensureSlotsArray, withSegments } from "@/lib/slot-utils";
+import { revalidatePath } from "next/cache";
 
 const defaultSegment = (start, end, endIsClosing) => ({
   segments: [
@@ -109,6 +110,11 @@ export async function POST(req) {
       kitchen_slots: normalizedKitchenSlots,
       notes,
     });
+    await Promise.all([
+      revalidatePath("/Roster"),
+      revalidatePath("/dashboard"),
+      revalidatePath("/"),
+    ]);
     return NextResponse.json({ success: true, data: result });
   } catch (e) {
     console.error(e);
@@ -206,7 +212,11 @@ export async function PATCH(req) {
       .set(values)
       .where(eq(business_requirements.id, id))
       .returning();
-
+    await Promise.all([
+      revalidatePath("/Roster"),
+      revalidatePath("/dashboard"),
+      revalidatePath("/"),
+    ]);
     return NextResponse.json({ success: true, data: result });
   } catch (e) {
     console.error(e);
@@ -224,6 +234,11 @@ export async function DELETE(req) {
     await db
       .delete(business_requirements)
       .where(eq(business_requirements.id, id));
+    await Promise.all([
+      revalidatePath("/Roster"),
+      revalidatePath("/dashboard"),
+      revalidatePath("/"),
+    ]);
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error(e);

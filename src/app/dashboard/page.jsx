@@ -18,16 +18,46 @@ import {
 
 function normalizeWeekStart(startParam) {
   if (!startParam) return null;
-  const date = new Date(startParam);
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
+  const decoded = decodeURIComponent(String(startParam)).trim();
+  if (!decoded) return null;
+
+  const isoMatch = decoded.match(/^\d{4}-\d{2}-\d{2}$/);
+  if (isoMatch) {
+    const [yearStr, monthStr, dayStr] = decoded.split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr) - 1;
+    const day = Number(dayStr);
+    const date = new Date(year, month, day, 0, 0, 0, 0);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const displayMatch = decoded.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (displayMatch) {
+    const [, dd, mm, yyyy] = displayMatch;
+    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), 0, 0, 0, 0);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
 }
 
 function toISODate(date) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toDisplayDate(date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 export default async function Dashboard({ searchParams }) {
   const today = new Date();
@@ -45,11 +75,13 @@ export default async function Dashboard({ searchParams }) {
     d.setDate(monday.getDate() + i);
     const iso = toISODate(d);
     const dayName = d.toLocaleDateString(undefined, { weekday: "long" });
-    return { date: iso, dayName };
+    return { date: iso, dayName, displayDate: toDisplayDate(d) };
   });
 
   const weekStartIso = weekDays[0].date;
   const weekEndIso = weekDays[6].date;
+  const weekStartDisplay = weekDays[0].displayDate;
+  const weekEndDisplay = weekDays[6].displayDate;
 
   const allEmployees = await db.select().from(employees);
   const availability = await db.select().from(employee_availability);
@@ -194,7 +226,7 @@ export default async function Dashboard({ searchParams }) {
             <div>
               <CardTitle className="text-2xl">Weekly Roster Dashboard</CardTitle>
               <p className="text-sm text-gray-500">
-                {weekStartIso} to {weekEndIso}
+                {weekStartDisplay} to {weekEndDisplay}
               </p>
             </div>
             <div className="flex gap-2">
@@ -233,7 +265,7 @@ export default async function Dashboard({ searchParams }) {
                   className="rounded-lg border border-gray-200"
                 >
                   <div className="border-b px-4 py-3 text-sm font-medium text-gray-800 bg-gray-50">
-                    {day.dayName} — {day.date}
+                    {day.dayName}
                     <span className="ml-2 text-xs font-normal text-gray-500">
                       Total Hours: {totalHours.toFixed(1)}
                     </span>

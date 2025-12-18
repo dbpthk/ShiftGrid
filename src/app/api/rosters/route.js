@@ -2,6 +2,7 @@ import db from "./../../../db/index";
 import { rosters } from "./../../../db/schema";
 import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 
 export async function GET() {
   try {
@@ -24,6 +25,11 @@ export async function POST(req) {
       .insert(rosters)
       .values({ employee_id, shift_date, shift_start, shift_end, role })
       .returning();
+    await Promise.all([
+      revalidatePath("/Roster"),
+      revalidatePath("/dashboard"),
+      revalidatePath("/"),
+    ]);
     return NextResponse.json({ success: true, data: result });
   } catch (e) {
     console.error(e);
@@ -48,6 +54,11 @@ export async function PATCH(req) {
       .set(values)
       .where(eq(rosters.id, id))
       .returning();
+    await Promise.all([
+      revalidatePath("/Roster"),
+      revalidatePath("/dashboard"),
+      revalidatePath("/"),
+    ]);
     return NextResponse.json({ success: true, data: result });
   } catch (e) {
     console.error(e);
@@ -62,6 +73,11 @@ export async function DELETE(req) {
     if (!id)
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     await db.delete(rosters).where(eq(rosters.id, id));
+    await Promise.all([
+      revalidatePath("/Roster"),
+      revalidatePath("/dashboard"),
+      revalidatePath("/"),
+    ]);
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error(e);

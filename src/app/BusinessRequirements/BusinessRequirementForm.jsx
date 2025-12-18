@@ -131,7 +131,7 @@ export default function BusinessRequirementForm({ usedDays = [] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-2xl">Add Business Requirement</CardTitle>
+        <CardTitle className="text-2xl">Add Roster Requirement</CardTitle>
       </CardHeader>
       <CardContent>
         <Form {...form}>

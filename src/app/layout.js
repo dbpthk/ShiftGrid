@@ -2,6 +2,7 @@ import "./globals.css";
 import { Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import Navbar from "@/components/Navbar";
+import "react-day-picker/dist/style.css";
 
 export const metadata = {
   title: "ShiftGrid",
